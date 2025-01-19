@@ -67,7 +67,7 @@ class RAGService:
         """Query Ollama's Granite model with context"""
         response = requests.post('http://localhost:11434/api/generate', 
             json={
-                "model": "granite",
+                "model": "granite3-dense",
                 "prompt": prompt,
                 "system": system_prompt,
                 "context": context,
