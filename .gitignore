@@ -15,3 +15,5 @@ config/local.json
 
 # IntelliJ IDEA #
 .idea/
+
+.env.local
