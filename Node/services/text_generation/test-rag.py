@@ -2,110 +2,62 @@ import json
 import sys
 import os
 from pathlib import Path
+import traceback
 from dotenv import load_dotenv
 from rag_service import RAGService
-import traceback
 
 def main():
     try:
-        # Debug paths
-        current_dir = os.getcwd()
-        print(f"Current working directory: {current_dir}")
+        # Load environment variables from .env.local
+        env_path = Path(os.getcwd()).parent / '.env.local'
+        print(f"\nLoading environment from: {env_path}")
         
-        # Try different possible locations for .env.local
-        possible_paths = [
-            Path(current_dir) / '.env.local',  # Current directory
-            Path(current_dir).parent / '.env.local',  # One level up
-            Path(current_dir).parent.parent / '.env.local',  # Two levels up
-        ]
-        
-        print("\nChecking for .env.local in:")
-        for path in possible_paths:
-            print(f"- {path} {'(exists)' if path.exists() else '(not found)'}")
-        
-        # Use the first existing .env.local file found
-        env_path = next((path for path in possible_paths if path.exists()), None)
-        if not env_path:
-            raise Exception(f".env.local file not found in any of the checked locations. Current directory: {current_dir}")
-
-        print(f"\nLoading .env.local from: {env_path}")
-        with open(env_path) as f:
-            env_content = f.read()
-            print("Environment file content:")
-            print(env_content)
-        
+        if not env_path.exists():
+            raise Exception(".env.local file not found")
+            
         load_dotenv(dotenv_path=env_path)
         
-        # Get credentials from environment
         api_secret_key = os.getenv("API_SECRET_KEY")
         if not api_secret_key:
             raise Exception("API_SECRET_KEY not found in .env.local")
-        print(f"\nAPI_SECRET_KEY found: {api_secret_key[:5]}...")
+        print(f"API_SECRET_KEY found: {api_secret_key[:5]}...")
         
         api_base_url = os.getenv("API_BASE_URL", "http://localhost:3000")
         print(f"Using API base URL: {api_base_url}")
         
+        activity_id = "678d195d5263c5a501dc68e7"  # Test activity ID
+        
         print("\nInitializing RAG service...")
-        rag_service = RAGService(api_secret_key, api_base_url)
+        rag_service = RAGService(
+            api_secret_key=api_secret_key,
+            api_base_url=api_base_url,
+            activity_id=activity_id
+        )
         
-        # Test message
-        test_message = {
-            "content": "What features of quantum computing make it different from classical computing?",
-            "activity_id": "678d195d5263c5a501dc68e7"
-        }
-        print(f"\nTest message: {json.dumps(test_message, indent=2)}")
+        # Test queries
+        test_queries = [
+            "What features of quantum computing make it different from classical computing?",
+            "How does quantum entanglement work in the XQZA-7?",
+            "What are the main applications of this quantum computer?"
+        ]
         
-        try:
-            print("\nFetching activity documents...")
-            # Fetch documents
-            docs_metadata = rag_service.fetch_documents(test_message["activity_id"])
-            print(f"\nType of docs_metadata: {type(docs_metadata)}")
-            print(f"Content of docs_metadata: {docs_metadata}")
+        print("\nTesting queries...")
+        for query in test_queries:
+            print(f"\n\nQuery: {query}")
             
-            if not docs_metadata:
-                raise Exception("No documents found for this activity")
-                
-            print("\nDocument metadata:", json.dumps(docs_metadata, indent=2))
+            # Get context using preloaded vectorstore
+            context = rag_service.get_context_for_query(query)
+            print(f"\nRetrieved context: {context}")
             
-            print("\nLoading document contents...")
-            documents = []
-            for doc in docs_metadata:
-                try:
-                    print(f"\nLoading document: {doc.get('filename', 'unknown')}")
-                    content = rag_service.load_document(doc["url"])
-                    print(f"Content length: {len(content) if content else 0} characters")
-                    documents.append(content)
-                except Exception as e:
-                    print(f"Failed to load document {doc.get('filename', 'unknown')}: {str(e)}")
-                    print("Document data:", json.dumps(doc, indent=2))
-                    print(traceback.format_exc())
-            
-            if not documents:
-                raise Exception("No document contents could be loaded")
-                
-            print(f"\nLoaded {len(documents)} documents")
-            
-            print("\nCreating vector store...")
-            vectorstore = rag_service.create_vectorstore(documents)
-            
-            print("\nGetting relevant context...")
-            context = rag_service.get_relevant_context(test_message["content"], vectorstore)
-            print("\nRetrieved context:", context)
-            
-            print("\nQuerying LLM...")
+            # Query LLM with context
             response = rag_service.query_ollama(
-                prompt=f"Context:\n{context}\n\nQuestion: {test_message['content']}",
+                prompt=f"Context:\n{context}\n\nQuestion: {query}",
                 system_prompt="You are a helpful AI assistant. Always refer to the specific information from the provided context in your response."
             )
-            print("\nLLM Response:", response)
-            
-        except Exception as e:
-            print(f"\n❌ Error in document processing: {str(e)}")
-            print("Full traceback:")
-            print(traceback.format_exc())
+            print(f"\nFinal response: {response}")
             
     except Exception as e:
-        print(f"\n❌ Error in setup: {str(e)}")
+        print(f"\n❌ Error: {str(e)}")
         print("Full traceback:")
         print(traceback.format_exc())
 

@@ -16,8 +16,18 @@ export class ConversationalAgent extends ApplicationController {
         textToSpeechService?: TextToSpeechService;
     } = {};
     targetPeer: string = '';
+    private activityId: string;
+
     constructor(configFile: string = 'config.json') {
         super(configFile);
+        
+        // Get activityId from environment variable
+        this.activityId = process.env.ACTIVITY_ID!;
+        if (!this.activityId) {
+            throw new Error('ACTIVITY_ID environment variable is required');
+        }
+        
+        this.log(`Initializing Conversational Agent for activity: ${this.activityId}`);
     }
 
     start(): void {
@@ -41,20 +51,17 @@ export class ConversationalAgent extends ApplicationController {
         this.components.speech2text = new SpeechToTextService(this.scene);
 
         // A TextGenerationService to generate text based on text
-        this.components.textGenerationService = new TextGenerationService(this.scene);
+        this.components.textGenerationService = new TextGenerationService(this.scene, this.activityId);
 
         // A TextToSpeechService to generate audio based on text
         this.components.textToSpeechService = new TextToSpeechService(this.scene);
     }
 
     definePipeline() {
-        // Step 1: When we receive audio data from a peer we send it to the transcription service and recording service
+        // Step 1: When we receive audio data from a peer we send it to the transcription service
         this.components.mediaReceiver?.on('audio', (uuid: string, data: RTCAudioData) => {
-            // Convert the Int16Array to a Buffer
             const sampleBuffer = Buffer.from(data.samples.buffer);
 
-
-            // Send the audio data to the transcription service and the audio recording service
             if (this.roomClient.peers.get(uuid) !== undefined) {
                 this.components.speech2text?.sendToChildProcess(uuid, sampleBuffer);
             }
@@ -62,31 +69,32 @@ export class ConversationalAgent extends ApplicationController {
 
         // Step 2: When we receive a response from the transcription service, we send it to the text generation service
         this.components.speech2text?.on('data', (data: Buffer, identifier: string) => {
-            // We obtain the peer object from the room client using the identifier
             const peer = this.roomClient.peers.get(identifier);
             const peerName = peer?.properties.get('ubiq.displayname');
 
-            let response = data.toString();
-
-            // Remove all newlines from the response
-            response = response.replace(/(\r\n|\n|\r)/gm, '');
+            let response = data.toString().replace(/(\r\n|\n|\r)/gm, '');
+            
             if (response.startsWith('>')) {
-                response = response.slice(1); // Slice off the leading '>' character
+                response = response.slice(1);
                 if (response.trim()) {
                     const message = (peerName + ' -> Agent:: ' + response).trim();
                     this.log(message);
 
-                    this.components.textGenerationService?.sendToChildProcess('default', message + '\n');
+                    // Pass activityId with each message
+                    this.components.textGenerationService?.sendToChildProcess(
+                        'default',
+                        message + '\n',
+                        this.activityId
+                    );
                 }
             }
         });
 
-        // Step 3: When we receive a response from the text generation service, we send it to the text to speech service
+        // Step 3: When we receive a response from the text generation service, send it to text to speech
         this.components.textGenerationService?.on('data', (data: Buffer, identifier: string) => {
             const response = data.toString();
             this.log('Received text generation response from child process ' + identifier + ': ' + response, 'info');
 
-            // Parse target peer from the response (Agent -> TargetPeer: Message)
             const [, name, message] = response.match(/-> (.*?):: (.*)/) || [];
 
             if (!name || !message) {

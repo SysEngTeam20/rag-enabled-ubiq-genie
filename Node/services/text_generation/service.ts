@@ -5,10 +5,12 @@ import * as dotenv from 'dotenv';
 import path from 'path';
 
 class TextGenerationService extends ServiceController {
-    private currentActivityId: string | null = null;
+    private activityId: string;
 
-    constructor(scene: NetworkScene) {
+    constructor(scene: NetworkScene, activityId: string) {
         super(scene, 'TextGenerationService');
+        
+        this.activityId = activityId;
         
         // Load .env.local file
         dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
@@ -28,18 +30,23 @@ class TextGenerationService extends ServiceController {
             '--prompt_suffix',
             nconf.get('prompt_suffix') || '',
             '--api_base_url',
-            apiBaseUrl
+            apiBaseUrl,
+            '--activity_id',
+            this.activityId  // Pass activityId to the Python process
         ]);
+
+        this.log(`TextGenerationService initialized for activity: ${this.activityId}`);
     }
 
     sendToChildProcess(identifier: string, message: string, activityId?: string) {
-        if (activityId) {
-            this.currentActivityId = activityId;
+        // Verify activityId matches the service's activityId
+        if (activityId && activityId !== this.activityId) {
+            this.log(`Warning: Received message for activity ${activityId} but service is configured for ${this.activityId}`);
         }
 
         const messageObj = {
             content: message,
-            activity_id: this.currentActivityId
+            activity_id: this.activityId
         };
 
         super.sendToChildProcess(identifier, JSON.stringify(messageObj) + '\n');
