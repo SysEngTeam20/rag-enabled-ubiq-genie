@@ -17,3 +17,5 @@ config/local.json
 .idea/
 
 .env.local
+
+venv
