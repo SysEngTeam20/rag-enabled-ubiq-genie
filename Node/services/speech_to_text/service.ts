@@ -23,7 +23,7 @@ class SpeechToTextService extends ServiceController {
 
             this.registerChildProcess(peer.uuid, 'python', [
                 '-u',
-                path.join(path.dirname(fileURLToPath(import.meta.url)), 'transcribe_azure.py'),
+                path.join(path.dirname(fileURLToPath(import.meta.url)), 'transcribe_ibm.py'),
             ]);
         });
 
