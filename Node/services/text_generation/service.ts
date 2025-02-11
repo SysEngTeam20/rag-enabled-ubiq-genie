@@ -1,10 +1,11 @@
 import { ServiceController } from '../../components/service';
 import { NetworkScene } from 'ubiq';
-import nconf from 'nconf';
-import * as dotenv from 'dotenv';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import * as dotenv from 'dotenv';
+import nconf from 'nconf';
 
-class TextGenerationService extends ServiceController {
+export class TextGenerationService extends ServiceController {
     private activityId: string;
 
     constructor(scene: NetworkScene, activityId: string) {
@@ -15,16 +16,17 @@ class TextGenerationService extends ServiceController {
         // Load .env.local file
         dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
         
-        // Ensure required environment variables are present
-        if (!process.env.API_SECRET_KEY) {
-            throw new Error('API_SECRET_KEY environment variable is required');
-        }
-        
+        // Get API base URL with default value
         const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:3000';
+        const apiSecretKey = process.env.API_SECRET_KEY;
         
-        this.registerChildProcess('default', 'python', [
+        if (!apiSecretKey) {
+            this.log('Warning: API_SECRET_KEY not found in environment variables. Some features may not work.');
+        }
+
+        const pythonProcess = this.registerChildProcess('default', 'python', [
             '-u',
-            '../../services/text_generation/rag_service.py',
+            path.join(path.dirname(fileURLToPath(import.meta.url)), 'rag_service.py'),
             '--preprompt',
             nconf.get('preprompt') || '',
             '--prompt_suffix',
@@ -32,8 +34,15 @@ class TextGenerationService extends ServiceController {
             '--api_base_url',
             apiBaseUrl,
             '--activity_id',
-            this.activityId  // Pass activityId to the Python process
+            this.activityId
         ]);
+
+        // Handle stderr separately for debug messages
+        if (pythonProcess.stderr) {
+            pythonProcess.stderr.on('data', (data: Buffer) => {
+                this.log(`Debug: ${data.toString().trim()}`);
+            });
+        }
 
         this.log(`TextGenerationService initialized for activity: ${this.activityId}`);
     }
@@ -52,5 +61,3 @@ class TextGenerationService extends ServiceController {
         super.sendToChildProcess(identifier, JSON.stringify(messageObj) + '\n');
     }
 }
-
-export { TextGenerationService };

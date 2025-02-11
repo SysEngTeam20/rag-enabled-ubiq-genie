@@ -13,6 +13,10 @@ from jwt import encode as jwt_encode
 from datetime import datetime, timedelta
 import traceback
 
+def log(message):
+    """Helper function to log messages to stderr"""
+    print(message, file=sys.stderr, flush=True)
+
 class RAGService:
     def __init__(self, api_secret_key: str, api_base_url: str, activity_id: str):
         self.api_secret_key = api_secret_key
@@ -27,43 +31,50 @@ class RAGService:
         )
         self.vectorstore = None
         
-        # Initialize vectorstore during startup
-        print("\nInitializing RAG service...")
-        print(f"Activity ID: {activity_id}")
-        self.initialize_vectorstore()
+        log("Initializing RAG service...")
+        log(f"Activity ID: {activity_id}")
+        log("Fetching documents...")
         
-    def initialize_vectorstore(self):
+        try:
+            # Initialize vectorstore
+            self.vectorstore = self._initialize_vectorstore()
+            log("Vectorstore initialization complete!")
+        except Exception as e:
+            log(f"Error initializing vectorstore: {str(e)}")
+            raise
+
+    def _initialize_vectorstore(self):
         """Load documents and create vectorstore during initialization"""
         try:
-            print("\nFetching documents...")
+            log(f"Making request to: {self.api_base_url}/api/llm/documents?activityId={self.activity_id}")
             docs_metadata = self.fetch_documents(self.activity_id)
-            print(f"Found {len(docs_metadata)} documents")
+            log(f"Found {len(docs_metadata)} documents")
             
-            print("\nLoading document contents...")
+            log("Loading document contents...")
             documents = []
             for doc in docs_metadata:
                 try:
                     content = self.load_document(doc["url"])
                     documents.append(content)
-                    print(f"Loaded document: {doc.get('name', 'unknown')}")
+                    log(f"Loaded document: {doc.get('name', 'unknown')}")
                 except Exception as e:
-                    print(f"Failed to load document {doc.get('name', 'unknown')}: {str(e)}")
+                    log(f"Failed to load document {doc.get('name', 'unknown')}: {str(e)}")
             
             if not documents:
                 raise Exception("No documents could be loaded")
             
-            print("\nCreating vectorstore...")
+            log("Creating vectorstore...")
             texts = []
             for doc in documents:
                 texts.extend(self.text_splitter.split_text(doc))
-            print(f"Created {len(texts)} text chunks")
+            log(f"Created {len(texts)} text chunks")
             
             self.vectorstore = FAISS.from_texts(texts, self.embeddings)
-            print("Vectorstore initialization complete!")
+            return self.vectorstore
             
         except Exception as e:
-            print(f"Error initializing vectorstore: {str(e)}")
-            print(traceback.format_exc())
+            log(f"Error initializing vectorstore: {str(e)}")
+            log(traceback.format_exc())
             raise
 
     def fetch_documents(self, activity_id: str) -> List[Dict]:
@@ -78,7 +89,7 @@ class RAGService:
         )
         
         url = f"{self.api_base_url}/api/llm/documents?activityId={activity_id}"
-        print(f"Making request to: {url}")
+        log(f"Making request to: {url}")
         
         response = requests.get(
             url,
@@ -102,10 +113,10 @@ class RAGService:
         
     def query_ollama(self, prompt: str, context: str = "", system_prompt: str = "") -> str:
         """Query Ollama's Granite model with context"""
-        print(f"\nSending request to Ollama...")
-        print(f"System prompt: {system_prompt}")
-        print(f"Context length: {len(context)} characters")
-        print(f"Query: {prompt}")
+        log(f"\nSending request to Ollama...")
+        log(f"System prompt: {system_prompt}")
+        log(f"Context length: {len(context)} characters")
+        log(f"Query: {prompt}")
         
         request_data = {
             "model": "granite3-dense",
@@ -126,7 +137,7 @@ class RAGService:
                 raise Exception(f"Ollama request failed: {response.status_code} - {response.text}")
             
             # Process the streaming response
-            print("\nResponse:", end=" ", flush=True)
+            log("\nResponse:", end=" ", flush=True)
             full_response = []
             for line in response.iter_lines(decode_unicode=True):
                 if not line:
@@ -136,20 +147,20 @@ class RAGService:
                     if chunk.get('done', False):
                         break
                     if 'response' in chunk:
-                        print(chunk['response'], end='', flush=True)
+                        log(chunk['response'], end='', flush=True)
                         full_response.append(chunk['response'])
                 except json.JSONDecodeError:
                     continue
             
-            print()  # New line after streaming
+            log()  # New line after streaming
             return ''.join(full_response)
             
         except requests.exceptions.ConnectionError:
             raise Exception("Failed to connect to Ollama. Is the Ollama server running?")
         except Exception as e:
-            print(f"Error querying Ollama: {str(e)}")
-            print(f"Full traceback:")
-            print(traceback.format_exc())
+            log(f"Error querying Ollama: {str(e)}")
+            log(f"Full traceback:")
+            log(traceback.format_exc())
             raise
         
     def get_context_for_query(self, query: str, k: int = 3) -> str:
@@ -161,57 +172,75 @@ class RAGService:
         return "\n".join([doc.page_content for doc in docs])
 
 if __name__ == "__main__":
-    # Load environment variables from .env.local
-    env_path = Path(os.getcwd()) / '.env.local'
-    load_dotenv(dotenv_path=env_path)
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--preprompt", type=str, default="")
-    parser.add_argument("--prompt_suffix", type=str, default="")
-    parser.add_argument("--api_base_url", type=str, required=True)
-    parser.add_argument("--activity_id", type=str, required=True)
-    args = parser.parse_args()
-    
-    api_secret_key = os.getenv("API_SECRET_KEY")
-    if not api_secret_key:
-        raise Exception("API_SECRET_KEY not found in .env.local")
-    
-    rag_service = RAGService(
-        api_secret_key=api_secret_key,
-        api_base_url=args.api_base_url,
-        activity_id=args.activity_id
-    )
-    
-    # Listen for messages
-    while True:
+    try:
+        # Load environment variables from .env.local
+        env_path = Path(os.getcwd()) / '.env.local'
+        load_dotenv(dotenv_path=env_path)
+        
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--preprompt", type=str, default="")
+        parser.add_argument("--prompt_suffix", type=str, default="")
+        parser.add_argument("--api_base_url", type=str, required=True)
+        parser.add_argument("--activity_id", type=str, required=True)
+        args = parser.parse_args()
+        
+        api_secret_key = os.getenv("API_SECRET_KEY")
+        if not api_secret_key:
+            log("API_SECRET_KEY not found in .env.local")
+            sys.exit(1)
+        
+        log("Initializing RAG service...")
+        log(f"Activity ID: {args.activity_id}")
+        
+        log("\nFetching documents...")
+        
         try:
-            line = sys.stdin.buffer.readline()
-            if len(line) == 0 or line.isspace():
-                continue
-                
-            try:
-                message = json.loads(line.decode("utf-8"))
-                query = message['content'].strip()
-                
-                # Get context using preloaded vectorstore
-                context = rag_service.get_context_for_query(query)
-                print(f"\nRetrieved context: {context}")
-                
-                # Query LLM with context
-                response = rag_service.query_ollama(
-                    prompt=f"Context:\n{context}\n\nQuestion: {query}",
-                    system_prompt=args.preprompt
-                )
-                print(f"\nFinal response: {response}")
-                
-                sys.stdout.write(">" + response + "\n")
-                sys.stdout.flush()
-                
-            except json.JSONDecodeError as e:
-                print(f"Error parsing message: {e}")
-                continue
-                
+            rag_service = RAGService(
+                api_secret_key=api_secret_key,
+                api_base_url=args.api_base_url,
+                activity_id=args.activity_id
+            )
+            log("RAG service initialized!")
+            
+            # Listen for messages
+            while True:
+                try:
+                    line = sys.stdin.buffer.readline()
+                    if len(line) == 0 or line.isspace():
+                        continue
+                        
+                    try:
+                        message = json.loads(line.decode("utf-8"))
+                        query = message['content'].strip()
+                        
+                        # Get context using preloaded vectorstore
+                        context = rag_service.get_context_for_query(query)
+                        log(f"Retrieved context: {context}")
+                        
+                        # Query LLM with context
+                        response = rag_service.query_ollama(
+                            prompt=f"Context:\n{context}\n\nQuestion: {query}",
+                            system_prompt=args.preprompt
+                        )
+                        log(f"Final response: {response}")
+                        
+                        # Only output the formatted response to stdout
+                        print(f">Agent -> User:: {response}", flush=True)
+                        
+                    except json.JSONDecodeError as e:
+                        log(f"Error parsing message: {e}")
+                        continue
+                        
+                except Exception as e:
+                    log(f"Error processing message: {e}")
+                    log(traceback.format_exc())
+                    continue
+                    
         except Exception as e:
-            print(f"Error processing message: {e}")
-            print(traceback.format_exc())
-            continue
+            log(f"Fatal error: {e}")
+            log(traceback.format_exc())
+            sys.exit(1)
+    except Exception as e:
+        log(f"Fatal error: {e}")
+        log(traceback.format_exc())
+        sys.exit(1)

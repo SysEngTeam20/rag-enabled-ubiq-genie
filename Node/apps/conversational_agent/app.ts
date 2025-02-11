@@ -7,6 +7,7 @@ import { MediaReceiver } from '../../components/media_receiver';
 import path from 'path';
 import { RTCAudioData } from '@roamhq/wrtc/types/nonstandard';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 
 export class ConversationalAgent extends ApplicationController {
     components: {
@@ -21,12 +22,11 @@ export class ConversationalAgent extends ApplicationController {
     constructor(configFile: string = 'config.json') {
         super(configFile);
         
-        // Get activityId from environment variable
-        this.activityId = process.env.ACTIVITY_ID!;
-        if (!this.activityId) {
-            throw new Error('ACTIVITY_ID environment variable is required');
-        }
+        // Load .env.local from project root
+        dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
         
+        // Get activityId from environment variable with a default value
+        this.activityId = process.env.ACTIVITY_ID || 'default-activity';
         this.log(`Initializing Conversational Agent for activity: ${this.activityId}`);
     }
 

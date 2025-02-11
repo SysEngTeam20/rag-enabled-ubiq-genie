@@ -32,11 +32,11 @@ class MyRecognizeCallback(RecognizeCallback):
 
 def recognize_from_stdin(peer):
     # Initialize the IBM Watson Speech to Text client
-    authenticator = IAMAuthenticator(os.environ.get('IBM_API_KEY'))
+    authenticator = IAMAuthenticator(os.environ.get('IBM_STT_API_KEY'))
     speech_to_text = SpeechToTextV1(
         authenticator=authenticator
     )
-    speech_to_text.set_service_url(os.environ.get('IBM_SERVICE_URL'))
+    speech_to_text.set_service_url(os.environ.get('IBM_STT_SERVICE_URL'))
 
     # Create callback object
     my_callback = MyRecognizeCallback()
