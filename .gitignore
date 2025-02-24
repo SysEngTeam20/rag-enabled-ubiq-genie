@@ -19,3 +19,5 @@ config/local.json
 .env.local
 
 venv
+
+secrets.yaml
