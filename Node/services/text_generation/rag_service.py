@@ -50,6 +50,12 @@ class RAGService:
             docs_metadata = self.fetch_documents(self.activity_id)
             log(f"Found {len(docs_metadata)} documents")
             
+            # Handle empty documents case
+            if not docs_metadata:
+                log("No documents found for this activity - operating in general knowledge mode")
+                self.vectorstore = None
+                return None
+                
             log("Loading document contents...")
             documents = []
             for doc in docs_metadata:
@@ -61,8 +67,10 @@ class RAGService:
                     log(f"Failed to load document {doc.get('name', 'unknown')}: {str(e)}")
             
             if not documents:
-                raise Exception("No documents could be loaded")
-            
+                log("No valid documents could be loaded - operating in general knowledge mode")
+                self.vectorstore = None
+                return None
+                
             log("Creating vectorstore...")
             texts = []
             for doc in documents:
@@ -112,53 +120,43 @@ class RAGService:
         return response.text
         
     def query_ollama(self, prompt: str, context: str = "", system_prompt: str = "") -> str:
-        """Query Ollama's Granite model with context"""
-        log(f"\nSending request to Ollama...")
+        """Query local LLM server with context"""
+        # Handle empty context case more gracefully
+        if context:
+            full_prompt = f"{system_prompt}\n\nContext:\n{context}\n\nQuestion: {prompt}"
+        else:
+            full_prompt = f"{system_prompt}\n\nQuestion: {prompt}"
+        
+        log(f"\nSending request to local LLM server...")
         log(f"System prompt: {system_prompt}")
         log(f"Context length: {len(context)} characters")
         log(f"Query: {prompt}")
         
-        request_data = {
-            "model": "granite3-dense",
-            "prompt": prompt,
-            "system": system_prompt
-        }
-        if context:
-            request_data["context"] = context
-            
         try:
             response = requests.post(
-                'http://localhost:11434/api/generate',
-                json=request_data,
-                stream=True
+                'http://localhost:8080/api/generate',
+                json={
+                    "prompt": full_prompt
+                },
+                headers={'Content-Type': 'application/json'}
             )
             
             if not response.ok:
-                raise Exception(f"Ollama request failed: {response.status_code} - {response.text}")
-            
-            # Process the streaming response
-            log("\nResponse:", end=" ", flush=True)
-            full_response = []
-            for line in response.iter_lines(decode_unicode=True):
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line)
-                    if chunk.get('done', False):
-                        break
-                    if 'response' in chunk:
-                        log(chunk['response'], end='', flush=True)
-                        full_response.append(chunk['response'])
-                except json.JSONDecodeError:
-                    continue
-            
-            log()  # New line after streaming
-            return ''.join(full_response)
+                raise Exception(f"LLM request failed: {response.status_code} - {response.text}")
+
+            # Parse JSON response
+            response_data = response.json()
+            if 'response' not in response_data:
+                raise Exception("Invalid response format from LLM server")
+
+            full_response = response_data['response']
+            log(f"Full response: {full_response}")
+            return full_response
             
         except requests.exceptions.ConnectionError:
-            raise Exception("Failed to connect to Ollama. Is the Ollama server running?")
+            raise Exception("Failed to connect to LLM server. Is the server running?")
         except Exception as e:
-            log(f"Error querying Ollama: {str(e)}")
+            log(f"Error querying LLM server: {str(e)}")
             log(f"Full traceback:")
             log(traceback.format_exc())
             raise
@@ -166,10 +164,15 @@ class RAGService:
     def get_context_for_query(self, query: str, k: int = 3) -> str:
         """Get relevant context for a query using the preloaded vectorstore"""
         if not self.vectorstore:
-            raise Exception("Vectorstore not initialized")
-        
-        docs = self.vectorstore.similarity_search(query, k=k)
-        return "\n".join([doc.page_content for doc in docs])
+            log("No vectorstore available - using general knowledge")
+            return ""
+            
+        try:
+            docs = self.vectorstore.similarity_search(query, k=k)
+            return "\n".join([doc.page_content for doc in docs])
+        except Exception as e:
+            log(f"Error retrieving context: {str(e)}")
+            return ""
 
 if __name__ == "__main__":
     try:

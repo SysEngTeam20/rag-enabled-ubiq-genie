@@ -25,7 +25,7 @@ def main():
         api_base_url = os.getenv("API_BASE_URL", "http://localhost:3000")
         print(f"Using API base URL: {api_base_url}")
         
-        activity_id = "678d195d5263c5a501dc68e7"  # Test activity ID
+        activity_id = "0742fc56-8e73-4d73-9488-60a3d936351b"  # Test activity ID
         
         print("\nInitializing RAG service...")
         rag_service = RAGService(
