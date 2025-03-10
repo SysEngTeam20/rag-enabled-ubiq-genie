@@ -43,6 +43,10 @@ graph TD
 
 Please refer to the [Local LLM Server repository](https://github.com/SysEngTeam20/native-granite-compilation) for instructions on how to compile and run the local LLM server.
 
+### ElectronJS App and Document Server
+
+Please refer to the [ElectronJS app repository](https://github.com/SysEngTeam20/portalt-portal) for instructions on how to compile and run the ElectronJS app, which includes the Document Server.
+
 ## Quick Start
 
 1. **Clone & Setup**
