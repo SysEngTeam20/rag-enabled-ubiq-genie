@@ -1,53 +1,98 @@
-# Welcome to Ubiq-Genie
+# Conversational Agent System (Ubiq-Genie Fork)
 
-![Illustrations of two sample demos available in Ubiq-Genie](header.png)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Ubiq-Genie is a framework that enables you to build server-assisted collaborative mixed reality applications with Unity using the [Ubiq](https://ubiq.online) framework. This is particularly useful for building multi-user applications that require server-side processing such as generative models, conversational agents, and real-time transcription. For more information, please refer to the [Ubiq-Genie paper](https://ubiq.online/publication/ubiq-genie/).
+> **Fork Note**: This project extends the [Ubiq-Genie](https://github.com/ubicomplab/ubiq-genie) framework with local LLM integration and enhanced RAG capabilities.
 
-> [!NOTE]
-> Before starting with Ubiq-Genie, we recommend that you familiarize yourself with the Ubiq framework. For more information, see Ubiq's [documentation](https://ucl-vr.github.io/ubiq/) and [website](https://ubiq.online). Ubiq-Genie currently uses Ubiq [v1.0.0-pre7](https://github.com/UCL-VR/ubiq/releases/tag/unity-v1.0.0-pre.7).
+A real-time voice AI agent with document context awareness powered by:
 
-## Initial Setup
+- Local LLM inference (Llama.cpp compatible)
+- Retrieval-Augmented Generation (RAG)
+- Secure JWT-authenticated document access
 
-These instructions will get you a copy of the project up and running to run the samples and to start building your own applications. Ubiq-Genie supports Windows, macOS, and Linux. Ubiq-Genie has a server-client architecture, which means you may need to run the server on a separate machine from the Unity client.
+## Features
 
-### Server (Node.js)
+- 🎙️ **Voice Interface**: Real-time STT/TTS conversion
+- 🧠 **Local Inference**: Private processing via compiled LLM server
+- 📚 **Context Awareness**: FAISS vector store (lines 46-72 `rag_service.py`)
+- 🔒 **Secure Access**: JWT document fetching (lines 88-100 `rag_service.py`)
+- 👥 **Multi-User**: Concurrent conversation tracking (lines 13-18 `app.ts`)
 
-0. Install [Node.js](https://nodejs.org/en/download/) (v20 or later) and [Python](https://www.python.org/downloads/) (v3.10 or later).
+## System Architecture
 
-1. Clone this repository somewhere on your machine (either local or remote).
+```mermaid
+graph TD
+    A[User Voice] --> B{Speech-to-Text}
+    B --> C[RAG Context]
+    C --> D[Local LLM]
+    D --> E[Response Gen]
+    E --> F{Text-to-Speech}
+    F --> G[Output]
+    C -->|No Docs| D
+```
 
-2. Open a terminal in the `Node` folder and run `npm install` to install the dependencies.
+## Requirements
 
-3. Install the Python dependencies by navigating to the `Node/services` folder and running `pip install -r requirements.txt`. If you are using a virtual environment, activate it before running the command. Please ensure that you have the correct PyTorch and CUDA versions installed (see the [PyTorch website](https://pytorch.org/get-started/locally/) for more information).
+### Core Dependencies
+- Python 3.10+
+- Node.js 20+
+- FAISS vector store
+- Sentence-transformers
 
-### Client (Unity)
+### Local LLM Server
 
-1. Install [Unity](https://unity3d.com/get-unity/download) 2022.3.32f1 or later.
+Please refer to the [Local LLM Server repository](https://github.com/SysEngTeam20/native-granite-compilation) for instructions on how to compile and run the local LLM server.
 
-2. Clone this repository somewhere on your local machine.
+## Quick Start
 
-3. Add the `Unity` folder to Unity Hub and open the project in Unity.
+1. **Clone & Setup**
+```bash
+git clone https://github.com/SysEngTeam20/rag-enabled-ubiq-genie.git
+cd rag-enabled-ubiq-genie
+pip install -r requirements.txt
+npm install
+```
 
-4. Navigate to Package Manager, click the Ubiq package (com.ucl.ubiq), navigate to the "Samples" tab, and import the "Demo (XRI)" sample. This will add the Unity XR Interaction Toolkit package to the project, as well as some scripts used by the Ubiq-Genie sample applications.
+2. **Configure Environment** (`.env.local`)
+```ini
+API_BASE_URL=http://localhost:3000
+API_SECRET_KEY=your_jwt_secret
+LLM_SERVER=http://localhost:8080
+```
 
-> [!NOTE]
-> Read the README file in the corresponding folder in the `Node/apps` folder for further setup instructions. For a list of available samples, see the [Samples](#samples) section below.
+3. **Launch System**
+
+```bash
+# Start Node.js Agent
+cd Node/apps/conversational_agent
+npm start
+```
+
+## Testing
+
+**Direct LLM Test**:
+
+**RAG Pipeline Test**:
+```bash
+python test-rag.py --query "What's our return policy?" \
+  --activity_id retail-docs
+```
 
 ## Documentation
 
-For more information on how to use Ubiq-Genie, please refer to the README files in the `Node` folder.
+| Component | Key Files | 
+|-----------|-----------|
+| RAG Service | `rag_service.py` (lines 46-175) |
+| Text Generation | `service.ts` (lines 8-48) | 
+| Agent Core | `app.ts` (lines 13-38) |
 
-## Samples
+## License
 
-The `Node/apps` folder contains a number of samples that demonstrate how to use Ubiq-Genie, which each utilize one or more services defined in the `Node/services` folder. For more information on how to use these samples, please refer to the README files in the corresponding folders. Currently, the following collaborative sample applications are available:
+MIT License - See [LICENSE](LICENSE)
 
-- [**Texture Generation**](Node/apps/texture_generation/README.md): generates a texture based on voice-based input and an optional ray to select target objects
-- [**Multi-user Conversational Agent**](Node/apps/conversational_agent/README.md): a conversational agent that can be interacted with by multiple users
-- [**Transcription**](Node/apps/transcription/README.md): transcribes and audio of each user in the room in separate files
+## Acknowledgements
 
-For a demo video of the samples, please refer to the [Ubiq-Genie demo video](https://youtu.be/cGz0z9BIgQk).
-
-## Support
-
-For any questions, please use the Discussions tab on GitHub or send a message in the *ubiq-genie* channel in the [Ubiq Discord server](https://discord.gg/cZYzdcxAAB). For bug reports, please use the Issues tab on GitHub.
+This project is a fork of the Ubiq-Genie framework:
+- Original Paper: [Ubiq-Genie: Framework for Developing Mixed Reality Experiences](https://ubiq.online/publication/ubiq-genie/)
+- Demo Video: [YouTube Walkthrough](https://youtu.be/cGz0z9BIgQk)
+- Parent Repository: [Ubiq-Genie GitHub](https://github.com/ubicomplab/ubiq-genie)
