@@ -26,7 +26,7 @@ export class ConversationalAgent extends ApplicationController {
         dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
         
         // Get activityId from environment variable with a default value
-        this.activityId = process.env.ACTIVITY_ID || 'default-activity';
+        this.activityId = process.env.ACTIVITY_ID || '0742fc56-8e73-4d73-9488-60a3d936351b';
         this.log(`Initializing Conversational Agent for activity: ${this.activityId}`);
     }
 

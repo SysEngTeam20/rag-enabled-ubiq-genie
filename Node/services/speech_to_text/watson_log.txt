@@ -1,0 +1,192 @@
+2025-03-11 12:04:47,992 - DEBUG - Speech-to-text process started with args: ['/Users/allenbridi/Desktop/Projects/ubiq-genie/Node/services/speech_to_text/transcribe_ibm.py', '--peer', '42524c1f-1745-4347-ac3c-d46372427c0f', '--debug', 'true']
+2025-03-11 12:04:47,992 - DEBUG - Python version: 3.11.11 (main, Dec  3 2024, 17:20:40) [Clang 16.0.0 (clang-1600.0.26.4)]
+2025-03-11 12:04:47,992 - DEBUG - IBM Watson version: 9.0.0
+2025-03-11 12:04:47,992 - DEBUG - Set service URL: https://api.us-south.speech-to-text.watson.cloud.ibm.com
+2025-03-11 12:04:47,992 - DEBUG - Set User-Agent: ibm-python-sdk-core-3.22.1 os.name=Darwin os.version=24.3.0 python.version=3.11.11
+2025-03-11 12:04:47,998 - DEBUG - Configuring BaseService instance with service name: speech_to_text
+2025-03-11 12:04:47,998 - DEBUG - Retrieving config properties for service 'speech_to_text'
+2025-03-11 12:04:47,998 - DEBUG - Retrieved 0 properties
+2025-03-11 12:04:47,998 - DEBUG - Set service URL: https://api.eu-gb.speech-to-text.watson.cloud.ibm.com/instances/37a7e3a4-174f-4513-80eb-d2e003bf7179
+2025-03-11 12:04:47,998 - DEBUG - Performing synchronous token fetch
+2025-03-11 12:04:47,999 - DEBUG - Invoking IAM get_token operation: https://iam.cloud.ibm.com/identity/token
+2025-03-11 12:04:48,004 - DEBUG - Starting new HTTPS connection (1): iam.cloud.ibm.com:443
+2025-03-11 12:04:48,155 - DEBUG - send: b'POST /identity/token HTTP/1.1
+Host: iam.cloud.ibm.com
+User-Agent: ibm-python-sdk-core/iam-authenticator-3.22.1 os.name=Darwin os.version=24.3.0 python.version=3.11.11
+Accept-Encoding: gzip, deflate
+Accept: application/json
+Connection: keep-alive
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 135
+
+'
+2025-03-11 12:04:48,155 - DEBUG - send: b'grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=[redacted]&response_type=cloud_iam'
+2025-03-11 12:04:48,513 - DEBUG - reply: 'HTTP/1.1 200 OK
+'
+2025-03-11 12:04:48,513 - DEBUG - header: x-content-type-options: nosniff
+2025-03-11 12:04:48,513 - DEBUG - header: ibm-cloud-service-name: iam-identity
+2025-03-11 12:04:48,513 - DEBUG - header: transaction-id: c3J0aGM-ff2ad9effc1048d59473596538ce13cd
+2025-03-11 12:04:48,513 - DEBUG - header: x-request-id: dd41667e-75a1-4e23-a6a4-5eabcf35f79f
+2025-03-11 12:04:48,513 - DEBUG - header: x-correlation-id: c3J0aGM-ff2ad9effc1048d59473596538ce13cd
+2025-03-11 12:04:48,513 - DEBUG - header: Cache-Control: no-cache, no-store, must-revalidate
+2025-03-11 12:04:48,513 - DEBUG - header: Expires: 0
+2025-03-11 12:04:48,513 - DEBUG - header: Pragma: no-cache
+2025-03-11 12:04:48,513 - DEBUG - header: Content-Type: application/json
+2025-03-11 12:04:48,513 - DEBUG - header: Content-Language: en-US
+2025-03-11 12:04:48,513 - DEBUG - header: strict-transport-security: max-age=31536000; includeSubDomains
+2025-03-11 12:04:48,513 - DEBUG - header: Vary: Accept-Encoding
+2025-03-11 12:04:48,513 - DEBUG - header: Content-Encoding: gzip
+2025-03-11 12:04:48,513 - DEBUG - header: Date: Tue, 11 Mar 2025 12:04:48 GMT
+2025-03-11 12:04:48,513 - DEBUG - header: Content-Length: 1139
+2025-03-11 12:04:48,513 - DEBUG - header: Connection: keep-alive
+2025-03-11 12:04:48,513 - DEBUG - header: Akamai-GRN: 0.3f0f1502.1741694688.1970e7b9
+2025-03-11 12:04:48,513 - DEBUG - header: x-proxy-upstream-service-time: 86
+2025-03-11 12:04:48,513 - DEBUG - https://iam.cloud.ibm.com:443 "POST /identity/token HTTP/1.1" 200 1139
+2025-03-11 12:04:48,514 - DEBUG - Returned from IAM get_token operation
+2025-03-11 12:04:48,514 - DEBUG - Using cached access token
+2025-03-11 12:04:48,514 - DEBUG - Authenticated outbound request (type=iam)
+2025-03-11 12:04:49,573 - INFO - Websocket connected
+2025-03-11 12:07:04,310 - DEBUG - Speech-to-text process started with args: ['/Users/allenbridi/Desktop/Projects/ubiq-genie/Node/services/speech_to_text/transcribe_ibm.py', '--peer', 'ff3a16d4-f485-4e0a-b13a-5d76fec305a3', '--debug', 'true']
+2025-03-11 12:07:04,311 - DEBUG - Python version: 3.11.11 (main, Dec  3 2024, 17:20:40) [Clang 16.0.0 (clang-1600.0.26.4)]
+2025-03-11 12:07:04,311 - DEBUG - IBM Watson version: 9.0.0
+2025-03-11 12:07:04,311 - DEBUG - Set service URL: https://api.us-south.speech-to-text.watson.cloud.ibm.com
+2025-03-11 12:07:04,311 - DEBUG - Set User-Agent: ibm-python-sdk-core-3.22.1 os.name=Darwin os.version=24.3.0 python.version=3.11.11
+2025-03-11 12:07:04,316 - DEBUG - Configuring BaseService instance with service name: speech_to_text
+2025-03-11 12:07:04,316 - DEBUG - Retrieving config properties for service 'speech_to_text'
+2025-03-11 12:07:04,317 - DEBUG - Retrieved 0 properties
+2025-03-11 12:07:04,317 - DEBUG - Set service URL: https://api.eu-gb.speech-to-text.watson.cloud.ibm.com/instances/37a7e3a4-174f-4513-80eb-d2e003bf7179
+2025-03-11 12:07:04,317 - DEBUG - Performing synchronous token fetch
+2025-03-11 12:07:04,317 - DEBUG - Invoking IAM get_token operation: https://iam.cloud.ibm.com/identity/token
+2025-03-11 12:07:04,322 - DEBUG - Starting new HTTPS connection (1): iam.cloud.ibm.com:443
+2025-03-11 12:07:04,378 - DEBUG - send: b'POST /identity/token HTTP/1.1
+Host: iam.cloud.ibm.com
+User-Agent: ibm-python-sdk-core/iam-authenticator-3.22.1 os.name=Darwin os.version=24.3.0 python.version=3.11.11
+Accept-Encoding: gzip, deflate
+Accept: application/json
+Connection: keep-alive
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 135
+
+'
+2025-03-11 12:07:04,378 - DEBUG - send: b'grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=[redacted]&response_type=cloud_iam'
+2025-03-11 12:07:04,736 - DEBUG - reply: 'HTTP/1.1 200 OK
+'
+2025-03-11 12:07:04,736 - DEBUG - header: x-content-type-options: nosniff
+2025-03-11 12:07:04,736 - DEBUG - header: ibm-cloud-service-name: iam-identity
+2025-03-11 12:07:04,737 - DEBUG - header: transaction-id: bWw4eGQ-9f8dd322a2f84664835c05a2dee52c08
+2025-03-11 12:07:04,737 - DEBUG - header: x-request-id: bed9a121-cfa9-4e35-8777-c404ca4f3b19
+2025-03-11 12:07:04,737 - DEBUG - header: x-correlation-id: bWw4eGQ-9f8dd322a2f84664835c05a2dee52c08
+2025-03-11 12:07:04,737 - DEBUG - header: Cache-Control: no-cache, no-store, must-revalidate
+2025-03-11 12:07:04,737 - DEBUG - header: Expires: 0
+2025-03-11 12:07:04,737 - DEBUG - header: Pragma: no-cache
+2025-03-11 12:07:04,737 - DEBUG - header: Content-Type: application/json
+2025-03-11 12:07:04,737 - DEBUG - header: Content-Language: en-US
+2025-03-11 12:07:04,737 - DEBUG - header: strict-transport-security: max-age=31536000; includeSubDomains
+2025-03-11 12:07:04,737 - DEBUG - header: Vary: Accept-Encoding
+2025-03-11 12:07:04,737 - DEBUG - header: Content-Encoding: gzip
+2025-03-11 12:07:04,737 - DEBUG - header: Date: Tue, 11 Mar 2025 12:07:04 GMT
+2025-03-11 12:07:04,737 - DEBUG - header: Content-Length: 1133
+2025-03-11 12:07:04,737 - DEBUG - header: Connection: keep-alive
+2025-03-11 12:07:04,737 - DEBUG - header: Akamai-GRN: 0.1c0f1502.1741694824.8a7511
+2025-03-11 12:07:04,737 - DEBUG - header: x-proxy-upstream-service-time: 168
+2025-03-11 12:07:04,738 - DEBUG - https://iam.cloud.ibm.com:443 "POST /identity/token HTTP/1.1" 200 1133
+2025-03-11 12:07:04,739 - DEBUG - Returned from IAM get_token operation
+2025-03-11 12:07:04,739 - DEBUG - Using cached access token
+2025-03-11 12:07:04,739 - DEBUG - Authenticated outbound request (type=iam)
+2025-03-11 12:07:05,274 - INFO - Websocket connected
+2025-03-11 12:09:19,573 - DEBUG - Speech-to-text process started with args: ['/Users/allenbridi/Desktop/Projects/ubiq-genie/Node/services/speech_to_text/transcribe_ibm.py', '--peer', 'bf990f43-2ab7-40cb-82e9-fce61ac65140', '--debug', 'true']
+2025-03-11 12:09:19,573 - DEBUG - Python version: 3.11.11 (main, Dec  3 2024, 17:20:40) [Clang 16.0.0 (clang-1600.0.26.4)]
+2025-03-11 12:09:19,573 - DEBUG - IBM Watson version: 9.0.0
+2025-03-11 12:09:19,573 - DEBUG - Set service URL: https://api.us-south.speech-to-text.watson.cloud.ibm.com
+2025-03-11 12:09:19,573 - DEBUG - Set User-Agent: ibm-python-sdk-core-3.22.1 os.name=Darwin os.version=24.3.0 python.version=3.11.11
+2025-03-11 12:09:19,579 - DEBUG - Configuring BaseService instance with service name: speech_to_text
+2025-03-11 12:09:19,579 - DEBUG - Retrieving config properties for service 'speech_to_text'
+2025-03-11 12:09:19,579 - DEBUG - Retrieved 0 properties
+2025-03-11 12:09:19,579 - DEBUG - Set service URL: https://api.eu-gb.speech-to-text.watson.cloud.ibm.com/instances/37a7e3a4-174f-4513-80eb-d2e003bf7179
+2025-03-11 12:09:19,579 - DEBUG - Performing synchronous token fetch
+2025-03-11 12:09:19,579 - DEBUG - Invoking IAM get_token operation: https://iam.cloud.ibm.com/identity/token
+2025-03-11 12:09:19,585 - DEBUG - Starting new HTTPS connection (1): iam.cloud.ibm.com:443
+2025-03-11 12:09:19,652 - DEBUG - send: b'POST /identity/token HTTP/1.1
+Host: iam.cloud.ibm.com
+User-Agent: ibm-python-sdk-core/iam-authenticator-3.22.1 os.name=Darwin os.version=24.3.0 python.version=3.11.11
+Accept-Encoding: gzip, deflate
+Accept: application/json
+Connection: keep-alive
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 135
+
+'
+2025-03-11 12:09:19,652 - DEBUG - send: b'grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=[redacted]&response_type=cloud_iam'
+2025-03-11 12:09:20,045 - DEBUG - reply: 'HTTP/1.1 200 OK
+'
+2025-03-11 12:09:20,046 - DEBUG - header: x-content-type-options: nosniff
+2025-03-11 12:09:20,046 - DEBUG - header: ibm-cloud-service-name: iam-identity
+2025-03-11 12:09:20,046 - DEBUG - header: transaction-id: NDRjazY-32b292749bf24ea9ad29e23dead30793
+2025-03-11 12:09:20,046 - DEBUG - header: x-request-id: 5f822f78-1830-4628-8ce5-e965000e8f3e
+2025-03-11 12:09:20,046 - DEBUG - header: x-correlation-id: NDRjazY-32b292749bf24ea9ad29e23dead30793
+2025-03-11 12:09:20,046 - DEBUG - header: Cache-Control: no-cache, no-store, must-revalidate
+2025-03-11 12:09:20,046 - DEBUG - header: Expires: 0
+2025-03-11 12:09:20,046 - DEBUG - header: Pragma: no-cache
+2025-03-11 12:09:20,046 - DEBUG - header: Content-Type: application/json
+2025-03-11 12:09:20,046 - DEBUG - header: Content-Language: en-US
+2025-03-11 12:09:20,046 - DEBUG - header: strict-transport-security: max-age=31536000; includeSubDomains
+2025-03-11 12:09:20,046 - DEBUG - header: Vary: Accept-Encoding
+2025-03-11 12:09:20,046 - DEBUG - header: Content-Encoding: gzip
+2025-03-11 12:09:20,046 - DEBUG - header: Date: Tue, 11 Mar 2025 12:09:20 GMT
+2025-03-11 12:09:20,046 - DEBUG - header: Content-Length: 1137
+2025-03-11 12:09:20,046 - DEBUG - header: Connection: keep-alive
+2025-03-11 12:09:20,046 - DEBUG - header: Akamai-GRN: 0.bfe41602.1741694959.f5259d
+2025-03-11 12:09:20,047 - DEBUG - header: x-proxy-upstream-service-time: 212
+2025-03-11 12:09:20,047 - DEBUG - https://iam.cloud.ibm.com:443 "POST /identity/token HTTP/1.1" 200 1137
+2025-03-11 12:09:20,048 - DEBUG - Returned from IAM get_token operation
+2025-03-11 12:09:20,048 - DEBUG - Using cached access token
+2025-03-11 12:09:20,048 - DEBUG - Authenticated outbound request (type=iam)
+2025-03-11 12:09:20,446 - INFO - Websocket connected
+2025-03-11 12:13:13,713 - DEBUG - Speech-to-text process started with args: ['/Users/allenbridi/Desktop/Projects/ubiq-genie/Node/services/speech_to_text/transcribe_ibm.py', '--peer', 'd3c8a0dc-126e-40f9-8bc7-2d6dcc0535e4', '--debug', 'true']
+2025-03-11 12:13:13,714 - DEBUG - Python version: 3.11.11 (main, Dec  3 2024, 17:20:40) [Clang 16.0.0 (clang-1600.0.26.4)]
+2025-03-11 12:13:13,714 - DEBUG - IBM Watson version: 9.0.0
+2025-03-11 12:13:13,714 - DEBUG - Set service URL: https://api.us-south.speech-to-text.watson.cloud.ibm.com
+2025-03-11 12:13:13,714 - DEBUG - Set User-Agent: ibm-python-sdk-core-3.22.1 os.name=Darwin os.version=24.3.0 python.version=3.11.11
+2025-03-11 12:13:13,719 - DEBUG - Configuring BaseService instance with service name: speech_to_text
+2025-03-11 12:13:13,719 - DEBUG - Retrieving config properties for service 'speech_to_text'
+2025-03-11 12:13:13,719 - DEBUG - Retrieved 0 properties
+2025-03-11 12:13:13,719 - DEBUG - Set service URL: https://api.eu-gb.speech-to-text.watson.cloud.ibm.com/instances/37a7e3a4-174f-4513-80eb-d2e003bf7179
+2025-03-11 12:13:13,719 - DEBUG - Performing synchronous token fetch
+2025-03-11 12:13:13,719 - DEBUG - Invoking IAM get_token operation: https://iam.cloud.ibm.com/identity/token
+2025-03-11 12:13:13,724 - DEBUG - Starting new HTTPS connection (1): iam.cloud.ibm.com:443
+2025-03-11 12:13:13,791 - DEBUG - send: b'POST /identity/token HTTP/1.1
+Host: iam.cloud.ibm.com
+User-Agent: ibm-python-sdk-core/iam-authenticator-3.22.1 os.name=Darwin os.version=24.3.0 python.version=3.11.11
+Accept-Encoding: gzip, deflate
+Accept: application/json
+Connection: keep-alive
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 135
+
+'
+2025-03-11 12:13:13,791 - DEBUG - send: b'grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=[redacted]&response_type=cloud_iam'
+2025-03-11 12:13:13,999 - DEBUG - reply: 'HTTP/1.1 200 OK
+'
+2025-03-11 12:13:13,999 - DEBUG - header: x-content-type-options: nosniff
+2025-03-11 12:13:13,999 - DEBUG - header: ibm-cloud-service-name: iam-identity
+2025-03-11 12:13:13,999 - DEBUG - header: transaction-id: dms4dDQ-fa706aab0fd64cfcb29bcce0af04b427
+2025-03-11 12:13:14,000 - DEBUG - header: x-request-id: 65ea8bfc-6e06-9df9-9f2f-c9276a15593e
+2025-03-11 12:13:14,000 - DEBUG - header: x-correlation-id: dms4dDQ-fa706aab0fd64cfcb29bcce0af04b427
+2025-03-11 12:13:14,000 - DEBUG - header: Cache-Control: no-cache, no-store, must-revalidate
+2025-03-11 12:13:14,000 - DEBUG - header: Expires: 0
+2025-03-11 12:13:14,000 - DEBUG - header: Pragma: no-cache
+2025-03-11 12:13:14,000 - DEBUG - header: Content-Type: application/json
+2025-03-11 12:13:14,000 - DEBUG - header: Content-Language: en-US
+2025-03-11 12:13:14,000 - DEBUG - header: strict-transport-security: max-age=31536000; includeSubDomains
+2025-03-11 12:13:14,000 - DEBUG - header: Vary: Accept-Encoding
+2025-03-11 12:13:14,000 - DEBUG - header: Content-Encoding: gzip
+2025-03-11 12:13:14,000 - DEBUG - header: Date: Tue, 11 Mar 2025 12:13:13 GMT
+2025-03-11 12:13:14,000 - DEBUG - header: Content-Length: 1136
+2025-03-11 12:13:14,000 - DEBUG - header: Connection: keep-alive
+2025-03-11 12:13:14,000 - DEBUG - header: Akamai-GRN: 0.bfe41602.1741695193.f76bfb
+2025-03-11 12:13:14,000 - DEBUG - header: x-proxy-upstream-service-time: 165
+2025-03-11 12:13:14,001 - DEBUG - https://iam.cloud.ibm.com:443 "POST /identity/token HTTP/1.1" 200 1136
+2025-03-11 12:13:14,001 - DEBUG - Returned from IAM get_token operation
+2025-03-11 12:13:14,002 - DEBUG - Using cached access token
+2025-03-11 12:13:14,002 - DEBUG - Authenticated outbound request (type=iam)
+2025-03-11 12:13:14,583 - INFO - Websocket connected

@@ -187,7 +187,7 @@ if __name__ == "__main__":
         parser.add_argument("--activity_id", type=str, required=True)
         args = parser.parse_args()
         
-        api_secret_key = os.getenv("API_SECRET_KEY")
+        api_secret_key = 'YrFvjWY7a6RUEZyu'
         if not api_secret_key:
             log("API_SECRET_KEY not found in .env.local")
             sys.exit(1)

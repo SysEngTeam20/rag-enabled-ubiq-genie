@@ -5,11 +5,13 @@ from ibm_watson import TextToSpeechV1
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
 
 def initialize_speech_synthesizer():
-    authenticator = IAMAuthenticator(os.environ.get('IBM_TTS_API_KEY'))
+    # authenticator = IAMAuthenticator(os.environ.get('IBM_TTS_API_KEY'))
+    authenticator = IAMAuthenticator('HdACGo0on0ZsvIjuqwYBjq6kDk1TSLt7p3vycCsAycz7')
     text_to_speech = TextToSpeechV1(
         authenticator=authenticator
     )
-    text_to_speech.set_service_url(os.environ.get('IBM_TTS_SERVICE_URL'))
+    # text_to_speech.set_service_url(os.environ.get('IBM_TTS_SERVICE_URL'))
+    text_to_speech.set_service_url('https://api.eu-gb.text-to-speech.watson.cloud.ibm.com/instances/3e7c35d2-5dbf-4e0f-a49f-dab1618a3fd1')
     return text_to_speech
 
 def transcribe_speech(text, synthesizer):
