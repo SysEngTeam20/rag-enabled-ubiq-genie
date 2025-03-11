@@ -95,19 +95,35 @@ export class ConversationalAgent extends ApplicationController {
             const response = data.toString();
             this.log('Received text generation response from child process ' + identifier + ': ' + response, 'info');
 
-            const [, name, message] = response.match(/-> (.*?):: (.*)/) || [];
-
-            if (!name || !message) {
-                this.log('Error parsing target peer and message', 'error');
+            // More robust parsing of response format that allows for variations
+            const match = response.match(/-> ([^:]+):: (.*)/);
+            
+            if (!match || !match[1] || !match[2]) {
+                this.log('Error parsing response format: ' + response, 'error');
                 return;
             }
 
-            this.targetPeer = name.trim();
-            this.components.textToSpeechService?.sendToChildProcess('default', message.trim() + '\n');
+            this.targetPeer = match[1].trim();
+            const message = match[2].trim();
+            
+            this.log(`Sending to TTS: "${message}" for target: ${this.targetPeer}`, 'info');
+            
+            // Ensure we're sending a properly formatted string to the TTS service
+            if (message && message.length > 0) {
+                this.components.textToSpeechService?.sendToChildProcess('default', message + '\n');
+            } else {
+                this.log('Empty message, not sending to TTS', 'warn');
+            }
         });
 
+        // Add diagnostic logging to the TTS service response
         this.components.textToSpeechService?.on('data', (data: Buffer, identifier: string) => {
-            let response = data;
+            this.log(`Received ${data.length} bytes of audio data from TTS service`, 'info');
+            
+            if (data.length === 0) {
+                this.log('Warning: Empty audio data from TTS', 'warn');
+                return;
+            }
 
             this.scene.send(new NetworkId(95), {
                 type: 'AudioInfo',
@@ -115,11 +131,42 @@ export class ConversationalAgent extends ApplicationController {
                 audioLength: data.length,
             });
 
+            let response = data;
+            let chunks = 0;
+            
             while (response.length > 0) {
                 this.scene.send(new NetworkId(95), response.slice(0, 16000));
                 response = response.slice(16000);
+                chunks++;
             }
+            
+            this.log(`Sent ${chunks} audio chunks to peer ${this.targetPeer}`, 'info');
         });
+    }
+
+    private sendAudioToPeer(audioData: Buffer, targetPeer: string) {
+        try {
+            console.log(`Sending ${audioData.length} bytes of audio to peer ${targetPeer}`);
+            
+            // Send smaller chunks to avoid network issues
+            const chunkSize = 8000; // Smaller chunks for better transmission
+            let sentBytes = 0;
+            
+            for (let i = 0; i < audioData.length; i += chunkSize) {
+                const chunk = audioData.slice(i, Math.min(i + chunkSize, audioData.length));
+                this.scene.send(new NetworkId(95), chunk);
+                sentBytes += chunk.length;
+                
+                // Small delay between chunks to prevent flooding
+                if (i + chunkSize < audioData.length) {
+                    setTimeout(() => {}, 5);
+                }
+            }
+            
+            console.log(`Successfully sent ${sentBytes} bytes of audio data`);
+        } catch (error) {
+            console.error('Error sending audio data:', error);
+        }
     }
 }
 

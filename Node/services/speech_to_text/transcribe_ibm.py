@@ -87,6 +87,7 @@ class MyRecognizeCallback(RecognizeCallback):
         logging.info("Watson is listening")
         
     def on_hypothesis(self, hypothesis):
+        # ISSUE: Hypothesis is being printed to stdout and included in the transcription
         print(f"[IBM] Hypothesis: {hypothesis}")
         logging.debug(f"Hypothesis: {hypothesis}")
         

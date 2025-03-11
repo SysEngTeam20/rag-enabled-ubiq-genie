@@ -4,6 +4,7 @@ import { NetworkScene } from 'ubiq';
 import nconf from 'nconf';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { TextToSpeechService } from '../text_to_speech/service';
 
 class SpeechToTextService extends ServiceController {
     private audioStats: Map<string, { 
@@ -13,23 +14,49 @@ class SpeechToTextService extends ServiceController {
         avgLevel: number
     }> = new Map();
 
+    private ttsService: TextToSpeechService | undefined;
+
     constructor(scene: NetworkScene, name = 'SpeechToTextService') {
         super(scene, name);
 
         this.registerRoomClientEvents();
         this.logAudioConnection();
         
+        // Fix the way we access components
+        try {
+            this.ttsService = scene.getComponent(TextToSpeechService) as TextToSpeechService;
+            console.log("[SpeechToTextService] Found TextToSpeechService");
+        } catch (error) {
+            console.error("[SpeechToTextService] ERROR: Could not find TextToSpeechService");
+        }
+        
         // Log when data is received from child processes
         this.on('data', (data: Buffer, identifier: string) => {
             const response = data.toString().trim();
+            
+            // Only forward clean transcriptions (starting with '>')
             if (response.startsWith('>')) {
-                console.log(`[SpeechToTextService] Transcription from Watson for peer ${identifier}: "${response.slice(1)}"`);
+                // Clean transcription without debug info
+                const cleanTranscription = response.slice(1).trim();
+                console.log(`[SpeechToTextService] Clean transcription: "${cleanTranscription}"`);
+                
+                // Forward to text generation service
+                scene.emit('speechTranscription', {
+                    text: cleanTranscription,
+                    peerId: identifier
+                });
+                
+                // Also notify the Virtual Assistant component
+                scene.emit('transcriptionComplete', {
+                    text: cleanTranscription,
+                    peerId: identifier
+                });
             } else if (response.startsWith('[IBM]')) {
+                // Just log Watson API messages, don't forward them
                 console.log(`[SpeechToTextService] Watson API: ${response}`);
             } else if (response.startsWith('[DEBUG]')) {
+                // Just log debug messages, don't forward them
                 console.log(`[SpeechToTextService] Python debug: ${response}`);
-            } else {
-                console.log(`[SpeechToTextService] Child process output for peer ${identifier}: ${response}`);
             }
         });
 
