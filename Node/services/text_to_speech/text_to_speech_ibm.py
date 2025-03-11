@@ -27,6 +27,26 @@ def transcribe_speech(text, synthesizer):
         # Debug logging
         print(f"[TTS] Received text to synthesize: '{text}'")
         
+        # Clean up the message - advanced filtering
+        clean_text = text.strip()
+        
+        # Remove any "Agent -> User::" prefixes if they somehow got through
+        if "Agent ->" in clean_text and "::" in clean_text:
+            clean_text = clean_text.split("::", 1)[1].strip()
+            
+        # Remove confidence scores and other metadata
+        metadata_markers = ['[confidence:', '[DEBUG', '[IBM]', 'Agent ->', '->']
+        for marker in metadata_markers:
+            if marker in clean_text:
+                clean_text = clean_text.split(marker)[0].strip()
+        
+        print(f"[TTS] Cleaned text for synthesis: '{clean_text}'")
+        
+        # Critical: Ensure we never send empty text to Watson
+        if not clean_text or len(clean_text.strip()) == 0:
+            clean_text = "I'm here to assist you."
+            print(f"[TTS] Using default text because cleaned text was empty")
+        
         # Create logs directory if it doesn't exist
         script_dir = os.path.dirname(os.path.abspath(__file__))
         log_dir = os.path.join(script_dir, "logs")
@@ -34,22 +54,16 @@ def transcribe_speech(text, synthesizer):
         
         # Generate unique filename with timestamp
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_text = ''.join(c if c.isalnum() else '_' for c in text[:20])
+        safe_text = ''.join(c if c.isalnum() else '_' for c in clean_text[:20])
         filename = f"{timestamp}_{safe_text}.wav"
         filepath = os.path.join(log_dir, filename)
         
-        print(f"[TTS] Will save to: {filepath}")
-        
-        # Clean up the message - remove debug info that might be in the text
-        clean_text = text
-        if '[DEBUG' in clean_text or '[IBM]' in clean_text:
-            parts = clean_text.split('[DEBUG')
-            clean_text = parts[0].strip()
-            print(f"[TTS] Cleaned text to: '{clean_text}'")
+        # Final safety check before calling Watson
+        synthesize_text = clean_text.strip() if clean_text.strip() else "Hello there."
         
         # Critical change: Request PCM L16 audio at 48kHz to match WebRTC expectations
         result = synthesizer.synthesize(
-            clean_text,
+            synthesize_text,  # Use our validated text
             voice='en-GB_KateV3Voice',
             accept='audio/l16;rate=48000'  # 16-bit PCM at 48kHz mono
         ).get_result().content
@@ -76,6 +90,25 @@ def transcribe_speech(text, synthesizer):
     except Exception as e:
         print(f"[TTS] ERROR: {str(e)}")
         traceback.print_exc()
+        
+        # Try with a fallback message in case of errors
+        try:
+            fallback_text = "I'm sorry, there was an error processing that."
+            print(f"[TTS] Trying fallback message: '{fallback_text}'")
+            
+            fallback_result = synthesizer.synthesize(
+                fallback_text,
+                voice='en-GB_KateV3Voice',
+                accept='audio/l16;rate=48000'
+            ).get_result().content
+            
+            sys.stdout.buffer.write(fallback_result)
+            sys.stdout.buffer.flush()
+            print("[TTS] Fallback message synthesized successfully")
+            
+        except Exception as fallback_error:
+            print(f"[TTS] Fallback also failed: {str(fallback_error)}")
+        
         return False
 
 def main():

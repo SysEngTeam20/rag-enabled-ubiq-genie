@@ -92,27 +92,43 @@ export class ConversationalAgent extends ApplicationController {
 
         // Step 3: When we receive a response from the text generation service, send it to text to speech
         this.components.textGenerationService?.on('data', (data: Buffer, identifier: string) => {
-            const response = data.toString();
-            this.log('Received text generation response from child process ' + identifier + ': ' + response, 'info');
-
-            // More robust parsing of response format that allows for variations
-            const match = response.match(/-> ([^:]+):: (.*)/);
+            const fullResponse = data.toString();
+            this.log('Received text generation response: ' + fullResponse, 'info');
             
-            if (!match || !match[1] || !match[2]) {
-                this.log('Error parsing response format: ' + response, 'error');
-                return;
-            }
-
-            this.targetPeer = match[1].trim();
-            const message = match[2].trim();
+            let cleanMessage = "";
             
-            this.log(`Sending to TTS: "${message}" for target: ${this.targetPeer}`, 'info');
-            
-            // Ensure we're sending a properly formatted string to the TTS service
-            if (message && message.length > 0) {
-                this.components.textToSpeechService?.sendToChildProcess('default', message + '\n');
+            // Extract actual response - handle any response format
+            if (fullResponse.includes("::")) {
+                // Format with :: delimiter (like "Agent -> User:: Hello")
+                const parts = fullResponse.split("::");
+                if (parts.length > 1) {
+                    cleanMessage = parts[1].trim();
+                }
+            } else if (fullResponse.includes(": ")) {
+                // Format with : delimiter (like "Agent -> Agent: Hello")
+                const parts = fullResponse.split(": ");
+                if (parts.length > 1) {
+                    cleanMessage = parts[parts.length-1].trim();
+                }
             } else {
-                this.log('Empty message, not sending to TTS', 'warning');
+                // Fallback - use the whole message
+                cleanMessage = fullResponse.trim();
+            }
+            
+            // Remove any confidence scores or metadata
+            if (cleanMessage.includes("[confidence:")) {
+                cleanMessage = cleanMessage.split("[confidence:")[0].trim();
+            }
+            
+            this.log(`Extracted message for TTS: "${cleanMessage}"`, 'info');
+            
+            // Verify we have actual text to synthesize
+            if (cleanMessage && cleanMessage.length > 0) {
+                this.components.textToSpeechService?.sendToChildProcess('default', cleanMessage + '\n');
+            } else {
+                this.log('Warning: Empty cleaned message, using fallback text', 'warning');
+                // Send a fallback message if we couldn't extract anything
+                this.components.textToSpeechService?.sendToChildProcess('default', "I'm here to assist you.\n");
             }
         });
 
@@ -121,7 +137,7 @@ export class ConversationalAgent extends ApplicationController {
             this.log(`Received ${data.length} bytes of PCM audio data from TTS`, 'info');
             
             if (data.length === 0) {
-                this.log('Warning: Empty audio data from TTS', 'warn');
+                this.log('Warning: Empty audio data from TTS', 'warning');
                 return;
             }
             
