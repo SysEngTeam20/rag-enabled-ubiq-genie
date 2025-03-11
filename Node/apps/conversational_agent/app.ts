@@ -112,35 +112,68 @@ export class ConversationalAgent extends ApplicationController {
             if (message && message.length > 0) {
                 this.components.textToSpeechService?.sendToChildProcess('default', message + '\n');
             } else {
-                this.log('Empty message, not sending to TTS', 'warn');
+                this.log('Empty message, not sending to TTS', 'warning');
             }
         });
 
         // Add diagnostic logging to the TTS service response
         this.components.textToSpeechService?.on('data', (data: Buffer, identifier: string) => {
+            // Log receipt of audio data
             this.log(`Received ${data.length} bytes of audio data from TTS service`, 'info');
             
             if (data.length === 0) {
-                this.log('Warning: Empty audio data from TTS', 'warn');
+                this.log('Warning: Empty audio data from TTS', 'warning');
                 return;
             }
-
+            
+            // Send audio format information first
             this.scene.send(new NetworkId(95), {
-                type: 'AudioInfo',
+                type: 'AudioFormatInfo',
                 targetPeer: this.targetPeer,
+                format: 'wav',          // Format is WAV
                 audioLength: data.length,
+                timestamp: Date.now()
             });
-
-            let response = data;
-            let chunks = 0;
             
-            while (response.length > 0) {
-                this.scene.send(new NetworkId(95), response.slice(0, 16000));
-                response = response.slice(16000);
-                chunks++;
-            }
-            
-            this.log(`Sent ${chunks} audio chunks to peer ${this.targetPeer}`, 'info');
+            // Small delay to ensure the format info is processed
+            setTimeout(() => {
+                // Send audio data in smaller chunks with proper timing
+                const chunkSize = 4000; // Smaller chunks for better transmission
+                let sentBytes = 0;
+                let chunkIndex = 0;
+                const totalChunks = Math.ceil(data.length / chunkSize);
+                
+                const sendNextChunk = () => {
+                    if (sentBytes >= data.length) {
+                        this.log(`Completed sending ${sentBytes} bytes of audio in ${chunkIndex} chunks`, 'info');
+                        return;
+                    }
+                    
+                    const chunk = data.slice(sentBytes, Math.min(sentBytes + chunkSize, data.length));
+                    
+                    // Send with metadata
+                    this.scene.send(new NetworkId(95), {
+                        type: 'AudioData',
+                        targetPeer: this.targetPeer,
+                        chunkIndex: chunkIndex,
+                        totalChunks: totalChunks,
+                        isLastChunk: sentBytes + chunk.length >= data.length,
+                        dataLength: chunk.length
+                    });
+                    
+                    // Send the actual audio data after the metadata
+                    this.scene.send(new NetworkId(95), chunk);
+                    
+                    sentBytes += chunk.length;
+                    chunkIndex++;
+                    
+                    // Schedule next chunk with a small delay
+                    setTimeout(sendNextChunk, 20);
+                };
+                
+                // Start sending chunks
+                sendNextChunk();
+            }, 50);
         });
     }
 
