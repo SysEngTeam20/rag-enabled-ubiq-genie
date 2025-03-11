@@ -116,64 +116,39 @@ export class ConversationalAgent extends ApplicationController {
             }
         });
 
-        // Add diagnostic logging to the TTS service response
+        // Simplify TTS handling to send raw PCM data
         this.components.textToSpeechService?.on('data', (data: Buffer, identifier: string) => {
-            // Log receipt of audio data
-            this.log(`Received ${data.length} bytes of audio data from TTS service`, 'info');
+            this.log(`Received ${data.length} bytes of PCM audio data from TTS`, 'info');
             
             if (data.length === 0) {
-                this.log('Warning: Empty audio data from TTS', 'warning');
+                this.log('Warning: Empty audio data from TTS', 'warn');
                 return;
             }
             
-            // Send audio format information first
+            // Basic info about the audio format
             this.scene.send(new NetworkId(95), {
-                type: 'AudioFormatInfo',
+                type: 'AudioData',
                 targetPeer: this.targetPeer,
-                format: 'wav',          // Format is WAV
-                audioLength: data.length,
-                timestamp: Date.now()
+                format: 'pcm',
+                sampleRate: 48000,
+                bitsPerSample: 16,
+                channels: 1,
+                length: data.length
             });
             
-            // Small delay to ensure the format info is processed
-            setTimeout(() => {
-                // Send audio data in smaller chunks with proper timing
-                const chunkSize = 4000; // Smaller chunks for better transmission
-                let sentBytes = 0;
-                let chunkIndex = 0;
-                const totalChunks = Math.ceil(data.length / chunkSize);
+            // Send in reasonably sized chunks
+            const chunkSize = 8000; 
+            for (let i = 0; i < data.length; i += chunkSize) {
+                const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
+                this.scene.send(new NetworkId(95), chunk);
                 
-                const sendNextChunk = () => {
-                    if (sentBytes >= data.length) {
-                        this.log(`Completed sending ${sentBytes} bytes of audio in ${chunkIndex} chunks`, 'info');
-                        return;
-                    }
-                    
-                    const chunk = data.slice(sentBytes, Math.min(sentBytes + chunkSize, data.length));
-                    
-                    // Send with metadata
-                    this.scene.send(new NetworkId(95), {
-                        type: 'AudioData',
-                        targetPeer: this.targetPeer,
-                        chunkIndex: chunkIndex,
-                        totalChunks: totalChunks,
-                        isLastChunk: sentBytes + chunk.length >= data.length,
-                        dataLength: chunk.length
-                    });
-                    
-                    // Send the actual audio data after the metadata
-                    this.scene.send(new NetworkId(95), chunk);
-                    
-                    sentBytes += chunk.length;
-                    chunkIndex++;
-                    
-                    // Schedule next chunk with a small delay
-                    setTimeout(sendNextChunk, 20);
-                };
-                
-                // Start sending chunks
-                sendNextChunk();
-            }, 50);
+                // This tiny delay helps prevent network congestion
+                if (i + chunkSize < data.length) {
+                    setTimeout(() => {}, 1);  
+                }
+            }
+            
+            this.log(`Sent ${Math.ceil(data.length / chunkSize)} chunks of PCM audio`, 'info');
         });
     }
 

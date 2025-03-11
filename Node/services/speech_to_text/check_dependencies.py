@@ -14,7 +14,7 @@ def check_dependencies():
     missing = []
     
     for package in required_packages:
-        try: 
+        try:
             __import__(package.replace('-', '_'))
             print(f"✅ {package} is installed")
         except ImportError:

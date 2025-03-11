@@ -1,10 +1,12 @@
 import os
 import sys
 import wave
+import struct
 from ibm_watson import TextToSpeechV1
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
 import datetime
 import traceback
+import io
 
 def initialize_speech_synthesizer():
     try:
@@ -41,33 +43,34 @@ def transcribe_speech(text, synthesizer):
         # Clean up the message - remove debug info that might be in the text
         clean_text = text
         if '[DEBUG' in clean_text or '[IBM]' in clean_text:
-            # Try to extract just the message part
             parts = clean_text.split('[DEBUG')
             clean_text = parts[0].strip()
             print(f"[TTS] Cleaned text to: '{clean_text}'")
         
-        # Get audio from IBM Watson TTS using the valid voice
+        # Critical change: Request PCM L16 audio at 48kHz to match WebRTC expectations
         result = synthesizer.synthesize(
             clean_text,
-            voice='en-GB_KateV3Voice',  # Updated to a valid voice
-            accept='audio/wav'  # Use WAV format which is more compatible
+            voice='en-GB_KateV3Voice',
+            accept='audio/l16;rate=48000'  # 16-bit PCM at 48kHz mono
         ).get_result().content
         
-        # Save the raw audio data for debugging
-        with open(os.path.join(log_dir, f"{timestamp}_raw_data.bin"), 'wb') as f:
+        # Save the raw PCM data and a WAV file for analysis
+        with open(os.path.join(log_dir, f"{timestamp}_raw_pcm.raw"), 'wb') as f:
             f.write(result)
+        
+        # Convert the PCM to a proper WAV file for verification
+        with wave.open(filepath, 'wb') as wf:
+            wf.setnchannels(1)  # mono
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(48000)  # 48kHz sample rate
+            wf.writeframes(result)
             
         print(f"[TTS] Synthesized {len(result)} bytes of audio data")
+        print(f"[TTS] Saved WAV to {filepath} and raw PCM for verification")
         
-        # Write to stdout
+        # Write PCM directly to stdout - Unity expects 16-bit PCM
         sys.stdout.buffer.write(result)
         sys.stdout.buffer.flush()
-        
-        # Also save to wave file 
-        with open(filepath, 'wb') as f:
-            f.write(result)
-            
-        print(f"[TTS] Saved audio output to {filepath}")
         
         return True
     except Exception as e:
