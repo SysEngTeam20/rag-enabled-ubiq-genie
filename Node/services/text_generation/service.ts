@@ -4,9 +4,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as dotenv from 'dotenv';
 import nconf from 'nconf';
+import { ChildProcess, spawn } from 'child_process';
 
 export class TextGenerationService extends ServiceController {
     private activityId: string;
+    childProcesses: Record<string, ChildProcess> = {};
 
     constructor(scene: NetworkScene, activityId: string) {
         super(scene, 'TextGenerationService');
@@ -47,17 +49,44 @@ export class TextGenerationService extends ServiceController {
         this.log(`TextGenerationService initialized for activity: ${this.activityId}`);
     }
 
-    sendToChildProcess(identifier: string, message: string, activityId?: string) {
-        // Verify activityId matches the service's activityId
-        if (activityId && activityId !== this.activityId) {
-            this.log(`Warning: Received message for activity ${activityId} but service is configured for ${this.activityId}`);
+    public sendToChildProcess(identifier: string, data: Buffer, activityId?: string): boolean {
+        // Ensure child process exists
+        if (!this.childProcesses[identifier]) {
+            this.log(`Creating new text generation process for ${identifier}`, 'warning');
+            const child = this.initChildProcess(identifier);
+            if (!child) {
+                this.log(`Failed to create text generation process for ${identifier}`, 'error');
+                return false;
+            }
+            this.childProcesses[identifier] = child;
         }
 
-        const messageObj = {
-            content: message,
-            activity_id: this.activityId
-        };
+        // Add activity ID to the message payload
+        const payload = activityId 
+            ? `${data.toString()}[ACTIVITY:${activityId}]`
+            : data.toString();
 
-        super.sendToChildProcess(identifier, JSON.stringify(messageObj) + '\n');
+        const result = super.sendToChildProcess(identifier, Buffer.from(payload));
+        return result !== undefined ? result : false;
+    }
+
+    private initChildProcess(identifier: string): ChildProcess | null {
+        try {
+            const scriptPath = path.join(__dirname, 'text_generation.py');
+            this.log(`Starting text generation process: ${scriptPath}`);
+            
+            const child = spawn('python3', [scriptPath], {
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+
+            child.stderr?.on('data', (data) => {
+                this.emit('error', new Error(`TextGen Error: ${data.toString()}`));
+            });
+
+            return child;
+        } catch (error: any) {
+            this.log(`Failed to start text generation process: ${error.message}`, 'error');
+            return null;
+        }
     }
 }

@@ -5,6 +5,9 @@ import nconf from 'nconf';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { TextToSpeechService } from '../text_to_speech/service';
+import fetch from 'node-fetch';
+import FormData from 'form-data';
+import WebSocket from 'ws';
 
 class SpeechToTextService extends ServiceController {
     private audioStats: Map<string, { 
@@ -15,6 +18,11 @@ class SpeechToTextService extends ServiceController {
     }> = new Map();
 
     private ttsService: TextToSpeechService | undefined;
+    private readonly STT_SERVER = 'http://localhost:5001/stt';
+    private wsConnection: WebSocket | null = null;
+    private readonly WS_SERVER = 'ws://localhost:5001/stt/ws';
+    private reconnectAttempts = 0;
+    private readonly MAX_RECONNECT_ATTEMPTS = 5;
 
     constructor(scene: NetworkScene, name = 'SpeechToTextService') {
         super(scene, name);
@@ -69,6 +77,8 @@ class SpeechToTextService extends ServiceController {
         this.on('exit', (code: number, identifier: string) => {
             console.log(`[SpeechToTextService] Child process for peer ${identifier} exited with code ${code}`);
         });
+
+        this.setupWebSocket();
     }
 
     // Direct access to childProcesses for debugging
@@ -76,41 +86,47 @@ class SpeechToTextService extends ServiceController {
         return Object.keys(this.childProcesses || {});
     }
 
-    // Override handleAudioData with explicit process management
-    sendToChildProcess(identifier: string, data: Buffer): void {
-        // Check if process exists
-        if (!this.childProcesses || !this.childProcesses[identifier]) {
-            // First attempt: try to create the process if it doesn't exist
-            if (!this.childProcesses?.[identifier]) {
-                console.log(`[SpeechToTextService] Process not found, attempting to create for peer ${identifier}`);
-                try {
-                    const processPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'transcribe_ibm.py');
-                    this.registerChildProcess(identifier, 'python', [
-                        '-u',
-                        processPath,
-                        '--peer', identifier,
-                        '--debug', 'true'
-                    ]);
-                    console.log(`[SpeechToTextService] Child processes after creation: ${this.childProcessList.join(', ')}`);
-                } catch (error) {
-                    console.error(`[SpeechToTextService] Failed to create process on-demand: ${error}`);
-                }
-            }
-            
-            // Log error if creation failed
-            if (!this.childProcesses?.[identifier]) {
-                if (!this.audioStats?.has(identifier) || this.audioStats.get(identifier)?.frames <= 1) {
-                    console.error(`[SpeechToTextService] ERROR: Child process for peer ${identifier} not found and couldn't be created. Speech-to-text will not work!`);
-                }
-                return;
-            }
-        }
-        
-        // Process exists, handle audio data
+    private setupWebSocket() {
         try {
-            super.sendToChildProcess(identifier, data);
+            const clientId = Math.random().toString(36).substring(7);
+            this.wsConnection = new WebSocket(`${this.WS_SERVER}/${clientId}`);
+
+            this.wsConnection.on('open', () => {
+                console.log('[SpeechToTextService] WebSocket connected');
+                this.reconnectAttempts = 0;
+            });
+
+            this.wsConnection.on('message', (data: WebSocket.Data) => {
+                try {
+                    const result = JSON.parse(data.toString());
+                    if (result.text) {
+                        this.emit('data', Buffer.from(`>${result.text}`), 'default');
+                    }
+                } catch (error) {
+                    console.error('[SpeechToTextService] Error parsing WebSocket message:', error);
+                }
+            });
+
+            this.wsConnection.on('close', () => {
+                console.log('[SpeechToTextService] WebSocket closed');
+                this.attemptReconnect();
+            });
+
+            this.wsConnection.on('error', (error) => {
+                console.error('[SpeechToTextService] WebSocket error:', error);
+                this.attemptReconnect();
+            });
+
         } catch (error) {
-            console.error(`[SpeechToTextService] Error sending data to child process: ${error}`);
+            console.error('[SpeechToTextService] Error setting up WebSocket:', error);
+        }
+    }
+
+    private attemptReconnect() {
+        if (this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
+            this.reconnectAttempts++;
+            console.log(`[SpeechToTextService] Attempting to reconnect (${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})`);
+            setTimeout(() => this.setupWebSocket(), 1000 * this.reconnectAttempts);
         }
     }
 
@@ -204,6 +220,21 @@ class SpeechToTextService extends ServiceController {
             
             this.originalSendToChildProcess(identifier, data);
         };
+    }
+
+    async sendToChildProcess(identifier: string, data: Buffer): Promise<boolean> {
+        if (!this.wsConnection || this.wsConnection.readyState !== WebSocket.OPEN) {
+            console.error('[SpeechToTextService] WebSocket not connected');
+            return false;
+        }
+
+        try {
+            this.wsConnection.send(data);
+            return true;
+        } catch (error) {
+            console.error('[SpeechToTextService] Error sending data:', error);
+            return false;
+        }
     }
 }
 
