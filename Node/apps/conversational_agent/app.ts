@@ -8,6 +8,7 @@ import path from 'path';
 import { RTCAudioData } from '@roamhq/wrtc/types/nonstandard';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import nconf from 'nconf';
 
 export class ConversationalAgent extends ApplicationController {
     components: {
@@ -18,8 +19,12 @@ export class ConversationalAgent extends ApplicationController {
     } = {};
     targetPeer: string = '';
     private activityId: string;
+    private readonly SPEECH_THRESHOLD = 1000; // Threshold for speech detection
+    private readonly MIN_SPEECH_DURATION = 0.1; // Minimum duration of speech in seconds
+    private speechBuffer: Map<string, { buffer: Uint8Array, startTime: number, isSpeaking: boolean }> = new Map();
 
     constructor(configFile: string = 'config.json') {
+        console.log('[ConversationalAgent] Initializing with config file:', configFile);
         super(configFile);
         
         // Load .env.local from project root
@@ -31,47 +36,160 @@ export class ConversationalAgent extends ApplicationController {
     }
 
     start(): void {
+        console.log('[ConversationalAgent] Starting application...');
+        
         // STEP 1: Register services (and any other components) used by the application
         this.registerComponents();
-        this.log(`Services registered: ${Object.keys(this.components).join(', ')}`);
+        console.log(`[ConversationalAgent] Services registered: ${Object.keys(this.components).join(', ')}`);
 
         // STEP 2: Define the application pipeline
         this.definePipeline();
-        this.log('Pipeline defined');
+        console.log('[ConversationalAgent] Pipeline defined');
 
         // STEP 3: Join a room based on the configuration (optionally creates a server)
-        this.joinRoom();
+        try {
+            // Set a specific room name if not configured
+            const roomName = nconf.get('roomname') || 'ai-agent-room';
+            nconf.set('roomname', roomName);
+            
+            this.joinRoom();
+            console.log('[ConversationalAgent] Room configuration:', {
+                roomName: nconf.get('roomname'),
+                roomServer: nconf.get('roomserver'),
+                peerUUID: this.roomClient?.peer?.uuid
+            });
+            
+            // Monitor room join status
+            if (!this.roomClient) {
+                throw new Error('[ConversationalAgent] Room client not initialized');
+            }
+
+            this.roomClient.addListener('OnJoinedRoom', (room: any) => {
+                console.log('[ConversationalAgent] Successfully joined room:', {
+                    roomName: nconf.get('roomname'),
+                    peers: Array.from(this.roomClient.peers.keys())
+                });
+            });
+        } catch (error) {
+            console.error('[ConversationalAgent] Failed to join room:', error);
+            throw error; // Re-throw to prevent silent failures
+        }
     }
 
     registerComponents() {
-        // An MediaReceiver to receive audio data from peers
-        this.components.mediaReceiver = new MediaReceiver(this.scene);
+        try {
+            // An MediaReceiver to receive audio data from peers
+            this.components.mediaReceiver = new MediaReceiver(this.scene);
+            console.log('[ConversationalAgent] MediaReceiver initialized');
 
-        // A SpeechToTextService to transcribe audio coming from peers
-        this.components.speech2text = new SpeechToTextService(this.scene);
+            // A SpeechToTextService to transcribe audio coming from peers
+            this.components.speech2text = new SpeechToTextService(this.scene);
+            console.log('[ConversationalAgent] SpeechToTextService initialized');
 
-        // A TextGenerationService to generate text based on text
-        this.components.textGenerationService = new TextGenerationService(this.scene, this.activityId);
+            // A TextGenerationService to generate text based on text
+            try {
+                this.components.textGenerationService = new TextGenerationService(this.scene, this.activityId);
+                console.log('[ConversationalAgent] TextGenerationService initialized');
+            } catch (error) {
+                console.error('[ConversationalAgent] Failed to initialize TextGenerationService:', error);
+                // Continue without text generation - we can still test audio
+            }
 
-        // A TextToSpeechService to generate audio based on text
-        this.components.textToSpeechService = new TextToSpeechService(this.scene);
+            // A TextToSpeechService to generate audio based on text
+            this.components.textToSpeechService = new TextToSpeechService(this.scene);
+            console.log('[ConversationalAgent] TextToSpeechService initialized');
+
+        } catch (error) {
+            console.error('[ConversationalAgent] Error during component registration:', error);
+            throw error;
+        }
     }
 
     definePipeline() {
-        // Step 1: When we receive audio data from a peer we send it to the transcription service
-        this.components.mediaReceiver?.on('audio', (uuid: string, data: RTCAudioData) => {
-            const sampleBuffer = Buffer.from(data.samples.buffer);
+        console.log('[ConversationalAgent] Setting up audio pipeline...');
+        
+        if (!this.components.mediaReceiver) {
+            console.error('[ConversationalAgent] MediaReceiver not initialized!');
+            return;
+        }
 
-            if (this.roomClient.peers.get(uuid) !== undefined) {
-                this.components.speech2text?.sendToChildProcess(uuid, sampleBuffer);
+        // Log all available components
+        console.log('[ConversationalAgent] Available components:', {
+            mediaReceiver: !!this.components.mediaReceiver,
+            speech2text: !!this.components.speech2text,
+            textGeneration: !!this.components.textGenerationService,
+            tts: !!this.components.textToSpeechService
+        });
+
+        this.components.mediaReceiver.on('audio', (uuid: string, data: RTCAudioData) => {
+            if (!this.roomClient.peers.get(uuid)) {
+                return;
             }
+
+            // Convert audio data to buffer
+            const sampleBuffer = Buffer.from(data.samples.buffer);
+            
+            // Calculate audio level
+            let sum = 0;
+            for (let i = 0; i < data.samples.length; i++) {
+                sum += Math.abs(data.samples[i]);
+            }
+            const avgLevel = sum / data.samples.length;
+
+            // Initialize speech buffer for this peer if not exists
+            if (!this.speechBuffer.has(uuid)) {
+                this.speechBuffer.set(uuid, {
+                    buffer: new Uint8Array(0),
+                    startTime: Date.now(),
+                    isSpeaking: false
+                });
+            }
+
+            const speechState = this.speechBuffer.get(uuid)!;
+
+            // Check if this is speech
+            if (avgLevel > this.SPEECH_THRESHOLD) {
+                if (!speechState.isSpeaking) {
+                    console.log(`[MediaReceiver] Speech detected from peer ${uuid}, level: ${avgLevel.toFixed(2)}`);
+                    speechState.isSpeaking = true;
+                    speechState.startTime = Date.now();
+                }
+                speechState.buffer = new Uint8Array([...speechState.buffer, ...sampleBuffer]);
+            } else {
+                if (speechState.isSpeaking) {
+                    // Check if we've been speaking long enough
+                    const duration = (Date.now() - speechState.startTime) / 1000;
+                    if (duration >= this.MIN_SPEECH_DURATION) {
+                        console.log(`[MediaReceiver] Sending speech buffer to STT, duration: ${duration.toFixed(2)}s`);
+                        this.components.speech2text?.sendToChildProcess(uuid, Buffer.from(speechState.buffer));
+                    } else {
+                        console.log(`[MediaReceiver] Speech too short, dropping (${duration.toFixed(2)}s)`);
+                    }
+                    speechState.isSpeaking = false;
+                    speechState.buffer = new Uint8Array(0);
+                }
+            }
+        });
+
+        // Monitor room events
+        this.roomClient.addListener('OnPeerAdded', (peer: { uuid: string }) => {
+            console.log(`[ConversationalAgent] New peer connected:`, {
+                uuid: peer.uuid,
+                timestamp: new Date().toISOString()
+            });
+        });
+
+        this.roomClient.addListener('OnPeerRemoved', (peer: { uuid: string }) => {
+            console.log(`[ConversationalAgent] Peer disconnected:`, {
+                uuid: peer.uuid,
+                timestamp: new Date().toISOString()
+            });
         });
 
         // Step 2: When we receive a response from the transcription service, we send it to the text generation service
         this.components.speech2text?.on('data', (data: Buffer, identifier: string) => {
             const peer = this.roomClient.peers.get(identifier);
-            const peerName = peer?.properties.get('ubiq.displayname');
-
+            const peerName = peer?.properties.get('ubiq.displayname') || 'User';
             let response = data.toString().replace(/(\r\n|\n|\r)/gm, '');
             
             if (response.startsWith('>')) {
@@ -81,38 +199,59 @@ export class ConversationalAgent extends ApplicationController {
                     this.log(message);
 
                     // Pass activityId with each message
-                    this.components.textGenerationService?.sendToChildProcess(
-                        'default',
-                        Buffer.from(message + '\n'),
-                        this.activityId
-                    );
+                    console.log('[ConversationalAgent] Sending to text generation:', {
+                        message,
+                        activityId: this.activityId,
+                        hasService: !!this.components.textGenerationService,
+                        serviceState: {
+                            pid: this.components.textGenerationService?.childProcesses['default']?.pid,
+                            killed: this.components.textGenerationService?.childProcesses['default']?.killed
+                        }
+                    });
+                    
+                    try {
+                        const result = this.components.textGenerationService?.sendToChildProcess(
+                            'default',
+                            Buffer.from(JSON.stringify({ content: message }))
+                        );
+                        console.log('[ConversationalAgent] Text generation send result:', result);
+                    } catch (error) {
+                        console.error('[ConversationalAgent] Error sending to text generation:', error);
+                    }
                 }
             }
         });
 
         // Step 3: When we receive a response from the text generation service, send it to text to speech
         this.components.textGenerationService?.on('data', (data: Buffer, identifier: string) => {
-            const fullResponse = data.toString();
-            this.log('Received text generation response: ' + fullResponse, 'info');
-            
+            const rawText = data.toString().trim();
+            console.log('[ConversationalAgent] Raw text generation response:', {
+                rawText,
+                length: rawText.length,
+                identifier,
+                timestamp: new Date().toISOString(),
+                hasTTS: !!this.components.textToSpeechService
+            });
+
+            // Extract actual response - handle any response format
             let cleanMessage = "";
             
             // Extract actual response - handle any response format
-            if (fullResponse.includes("::")) {
+            if (rawText.includes("::")) {
                 // Format with :: delimiter (like "Agent -> User:: Hello")
-                const parts = fullResponse.split("::");
+                const parts = rawText.split("::");
                 if (parts.length > 1) {
                     cleanMessage = parts[1].trim();
                 }
-            } else if (fullResponse.includes(": ")) {
+            } else if (rawText.includes(": ")) {
                 // Format with : delimiter (like "Agent -> Agent: Hello")
-                const parts = fullResponse.split(": ");
+                const parts = rawText.split(": ");
                 if (parts.length > 1) {
                     cleanMessage = parts[parts.length-1].trim();
                 }
             } else {
                 // Fallback - use the whole message
-                cleanMessage = fullResponse.trim();
+                cleanMessage = rawText.trim();
             }
             
             // Remove any confidence scores or metadata
@@ -120,13 +259,23 @@ export class ConversationalAgent extends ApplicationController {
                 cleanMessage = cleanMessage.split("[confidence:")[0].trim();
             }
             
-            this.log(`Extracted message for TTS: "${cleanMessage}"`, 'info');
+            console.log('[ConversationalAgent] Processed message for TTS:', {
+                original: rawText,
+                cleaned: cleanMessage,
+                length: cleanMessage.length,
+                timestamp: new Date().toISOString()
+            });
             
             // Verify we have actual text to synthesize
             if (cleanMessage && cleanMessage.length > 0) {
+                console.log('[ConversationalAgent] Sending to TTS:', {
+                    message: cleanMessage,
+                    length: cleanMessage.length,
+                    timestamp: new Date().toISOString()
+                });
                 this.components.textToSpeechService?.sendToChildProcess('default', cleanMessage + '\n');
             } else {
-                this.log('Warning: Empty cleaned message, using fallback text', 'warning');
+                console.log('[ConversationalAgent] Warning: Empty cleaned message, using fallback text');
                 // Send a fallback message if we couldn't extract anything
                 this.components.textToSpeechService?.sendToChildProcess('default', "I'm here to assist you.\n");
             }
@@ -134,10 +283,13 @@ export class ConversationalAgent extends ApplicationController {
 
         // Simplify TTS handling to send raw PCM data
         this.components.textToSpeechService?.on('data', (data: Buffer, identifier: string) => {
-            this.log(`Received ${data.length} bytes of PCM audio data from TTS`, 'info');
+            console.log('[ConversationalAgent] TTS audio data received:', {
+                bytes: data.length,
+                timestamp: new Date().toISOString()
+            });
             
             if (data.length === 0) {
-                this.log('Warning: Empty audio data from TTS', 'warning');
+                console.log('[ConversationalAgent] Warning: Empty audio data from TTS');
                 return;
             }
             
@@ -164,7 +316,7 @@ export class ConversationalAgent extends ApplicationController {
                 }
             }
             
-            this.log(`Sent ${Math.ceil(data.length / chunkSize)} chunks of PCM audio`, 'info');
+            console.log(`Sent ${Math.ceil(data.length / chunkSize)} chunks of PCM audio`, 'info');
         });
     }
 

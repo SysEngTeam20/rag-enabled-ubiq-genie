@@ -172,7 +172,7 @@ def recognize_from_stdin(peer, debug=False):
                     audio_level = sum(abs(s) for s in samples) / len(samples) if samples else 0
                     
                     # Log active audio
-                    if audio_level > 500:  # Arbitrary threshold for speech
+                    if audio_level > 100:  # Lowered threshold for speech detection
                         if not audio_detected:
                             print(f"[IBM] Speech detected! Audio level: {audio_level:.2f}")
                             audio_detected = True

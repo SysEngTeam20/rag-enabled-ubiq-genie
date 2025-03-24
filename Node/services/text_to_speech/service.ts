@@ -39,7 +39,7 @@ export class TextToSpeechService extends ServiceController {
                 this.attemptReconnect();
             });
 
-        } catch (error) {
+        } catch (error) { 
             console.error('[TextToSpeechService] Error setting up WebSocket:', error);
         }
     }

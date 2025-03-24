@@ -5,8 +5,6 @@ import nconf from 'nconf';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { TextToSpeechService } from '../text_to_speech/service';
-import fetch from 'node-fetch';
-import FormData from 'form-data';
 import WebSocket from 'ws';
 
 class SpeechToTextService extends ServiceController {
@@ -16,6 +14,7 @@ class SpeechToTextService extends ServiceController {
         lastTimestamp: number,
         avgLevel: number
     }> = new Map();
+    private originalSendToChildProcess!: (identifier: string, data: Buffer) => Promise<boolean>;
 
     private ttsService: TextToSpeechService | undefined;
     private readonly STT_SERVER = 'http://localhost:5001/stt';
@@ -23,6 +22,8 @@ class SpeechToTextService extends ServiceController {
     private readonly WS_SERVER = 'ws://localhost:5001/stt/ws';
     private reconnectAttempts = 0;
     private readonly MAX_RECONNECT_ATTEMPTS = 5;
+    private audioBuffer: Map<string, Uint8Array> = new Map();
+    private readonly BUFFER_SIZE = 4800; // 100ms of audio at 48kHz
 
     constructor(scene: NetworkScene, name = 'SpeechToTextService') {
         super(scene, name);
@@ -32,7 +33,7 @@ class SpeechToTextService extends ServiceController {
         
         // Fix the way we access components
         try {
-            this.ttsService = scene.getComponent(TextToSpeechService) as TextToSpeechService;
+            this.ttsService = scene.getComponent('TextToSpeechService') as unknown as TextToSpeechService;
             console.log("[SpeechToTextService] Found TextToSpeechService");
         } catch (error) {
             console.error("[SpeechToTextService] ERROR: Could not find TextToSpeechService");
@@ -59,9 +60,6 @@ class SpeechToTextService extends ServiceController {
                     text: cleanTranscription,
                     peerId: identifier
                 });
-            } else if (response.startsWith('[IBM]')) {
-                // Just log Watson API messages, don't forward them
-                console.log(`[SpeechToTextService] Watson API: ${response}`);
             } else if (response.startsWith('[DEBUG]')) {
                 // Just log debug messages, don't forward them
                 console.log(`[SpeechToTextService] Python debug: ${response}`);
@@ -136,17 +134,18 @@ class SpeechToTextService extends ServiceController {
             throw new Error('RoomClient must be added to the scene before AudioCollector');
         }
 
-        this.roomClient.addListener('OnPeerAdded', (peer: { uuid: string }) => {
+        this.roomClient.addListener('OnPeerAdded', async (peer: { uuid: string }) => {
             this.log(`Starting speech-to-text process for peer ${peer.uuid}`);
 
             try {
                 // Try Python3 explicitly if Python fails
                 let pythonCommand = 'python';
                 try {
-                    const pythonVersionCmd = require('child_process').spawnSync(pythonCommand, ['--version']);
+                    const { spawnSync } = await import('child_process');
+                    const pythonVersionCmd = spawnSync(pythonCommand, ['--version']);
                     if (pythonVersionCmd.error) {
                         pythonCommand = 'python3';
-                        const python3VersionCmd = require('child_process').spawnSync(pythonCommand, ['--version']);
+                        const python3VersionCmd = spawnSync(pythonCommand, ['--version']);
                         if (!python3VersionCmd.error) {
                             console.log(`[SpeechToTextService] Using ${pythonCommand}: ${python3VersionCmd.stdout || python3VersionCmd.stderr}`);
                         } else {
@@ -156,14 +155,14 @@ class SpeechToTextService extends ServiceController {
                         console.log(`[SpeechToTextService] Using ${pythonCommand}: ${pythonVersionCmd.stdout || pythonVersionCmd.stderr}`);
                     }
                     
-                    const processPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'transcribe_ibm.py');
+                    const processPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'transcribe_local.py');
                     console.log(`[SpeechToTextService] Launching Python script at: ${processPath}`);
                     
                     this.registerChildProcess(peer.uuid, pythonCommand, [
                         '-u',
                         processPath,
                         '--peer', peer.uuid,
-                        '--debug', 'true'
+                        '--debug'
                     ]);
                     
                     // Directly check if process was created
@@ -206,7 +205,7 @@ class SpeechToTextService extends ServiceController {
         
         // Add this at the beginning of sendToChildProcess before other code
         this.originalSendToChildProcess = this.sendToChildProcess;
-        this.sendToChildProcess = (identifier: string, data: Buffer) => {
+        this.sendToChildProcess = async (identifier: string, data: Buffer): Promise<boolean> => {
             bytesReceived += data.length;
             
             // Log first few packets
@@ -214,11 +213,11 @@ class SpeechToTextService extends ServiceController {
                 console.log(`[SpeechToTextService] Received ${data.length} bytes of audio data from Unity`);
                 // Log first 10 bytes to see what's in the data
                 if (data.length > 0) {
-                    console.log(`[SpeechToTextService] First 10 bytes: ${Buffer.from(data.slice(0, 10)).toString('hex')}`);
+                    console.log(`[SpeechToTextService] First 10 bytes: ${data.subarray(0, 10).toString('hex')}`);
                 }
             }
             
-            this.originalSendToChildProcess(identifier, data);
+            return this.originalSendToChildProcess(identifier, data);
         };
     }
 
@@ -229,7 +228,27 @@ class SpeechToTextService extends ServiceController {
         }
 
         try {
-            this.wsConnection.send(data);
+            // Add to buffer
+            if (!this.audioBuffer.has(identifier)) {
+                this.audioBuffer.set(identifier, new Uint8Array(0));
+            }
+            const buffer = this.audioBuffer.get(identifier)!;
+            this.audioBuffer.set(identifier, new Uint8Array([...buffer, ...data]));
+
+            // Send when buffer is full
+            if (this.audioBuffer.get(identifier)!.length >= this.BUFFER_SIZE) {
+                const audioData = this.audioBuffer.get(identifier)!;
+                console.log(`[SpeechToTextService] Sending ${audioData.length} bytes of buffered audio data to WebSocket`);
+                
+                // Log first few bytes to verify data format
+                if (audioData.length > 0) {
+                    console.log(`[SpeechToTextService] First 10 bytes: ${Buffer.from(audioData.subarray(0, 10)).toString('hex')}`);
+                }
+                
+                this.wsConnection.send(audioData);
+                this.audioBuffer.set(identifier, new Uint8Array(0));
+            }
+            
             return true;
         } catch (error) {
             console.error('[SpeechToTextService] Error sending data:', error);

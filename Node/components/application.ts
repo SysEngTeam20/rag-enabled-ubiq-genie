@@ -80,8 +80,26 @@ export class ApplicationController {
         const __dirname = path.dirname(fileURLToPath(import.meta.url));
         const ubiqPath = path.resolve(__dirname, '..', 'node_modules', 'ubiq-server');
 
-        var params = ['start'];
-        // If configPath is provided, add it to the params
+        // First ensure the server is installed
+        try {
+            await new Promise((resolve, reject) => {
+                const install = spawn('npm', ['install'], {
+                    stdio: 'inherit',
+                    cwd: ubiqPath,
+                    shell: true
+                });
+                install.on('close', (code) => {
+                    if (code === 0) resolve(undefined);
+                    else reject(new Error(`npm install failed with code ${code}`));
+                });
+            });
+        } catch (error) {
+            console.error('[ApplicationController] Failed to install ubiq-server dependencies:', error);
+            throw error;
+        }
+
+        // Then start the server
+        const params = ['start'];
         if (configPath) {
             const absConfigPath = path.resolve(__dirname, configPath);
             params.push(absConfigPath);
@@ -106,10 +124,27 @@ export class ApplicationController {
         }
 
         // Wait for the child process to print "Added RoomServer port" before returning
-        return new Promise<void>((resolve) => {
+        return new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Timeout waiting for Ubiq server to start'));
+            }, 30000); // 30 second timeout
+
             child.stdout?.on('data', (data) => {
                 if (data.toString().includes('Added RoomServer port')) {
+                    clearTimeout(timeout);
                     resolve();
+                }
+            });
+
+            child.on('error', (error) => {
+                clearTimeout(timeout);
+                reject(error);
+            });
+
+            child.on('exit', (code) => {
+                if (code !== 0) {
+                    clearTimeout(timeout);
+                    reject(new Error(`Ubiq server exited with code ${code}`));
                 }
             });
         });
