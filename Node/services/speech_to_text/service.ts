@@ -18,15 +18,16 @@ class SpeechToTextService extends ServiceController {
 
     private ttsService: TextToSpeechService | undefined;
     private readonly STT_SERVER = 'http://localhost:5001/stt';
-    private wsConnection: WebSocket | null = null;
-    private readonly WS_SERVER = 'ws://localhost:5001/stt/ws';
     private reconnectAttempts = 0;
     private readonly MAX_RECONNECT_ATTEMPTS = 5;
     private audioBuffer: Map<string, Uint8Array> = new Map();
     private readonly BUFFER_SIZE = 4800; // 100ms of audio at 48kHz
+    private activityId: string;
 
-    constructor(scene: NetworkScene, name = 'SpeechToTextService') {
+    constructor(scene: NetworkScene, name = 'SpeechToTextService', activityId: string) {
         super(scene, name);
+        this.activityId = activityId;
+        console.log(`[SpeechToTextService] Initialized with activity ID: ${this.activityId}`);
 
         this.registerRoomClientEvents();
         this.logAudioConnection();
@@ -75,57 +76,11 @@ class SpeechToTextService extends ServiceController {
         this.on('exit', (code: number, identifier: string) => {
             console.log(`[SpeechToTextService] Child process for peer ${identifier} exited with code ${code}`);
         });
-
-        this.setupWebSocket();
     }
 
     // Direct access to childProcesses for debugging
     private get childProcessList(): string[] {
         return Object.keys(this.childProcesses || {});
-    }
-
-    private setupWebSocket() {
-        try {
-            const clientId = Math.random().toString(36).substring(7);
-            this.wsConnection = new WebSocket(`${this.WS_SERVER}/${clientId}`);
-
-            this.wsConnection.on('open', () => {
-                console.log('[SpeechToTextService] WebSocket connected');
-                this.reconnectAttempts = 0;
-            });
-
-            this.wsConnection.on('message', (data: WebSocket.Data) => {
-                try {
-                    const result = JSON.parse(data.toString());
-                    if (result.text) {
-                        this.emit('data', Buffer.from(`>${result.text}`), 'default');
-                    }
-                } catch (error) {
-                    console.error('[SpeechToTextService] Error parsing WebSocket message:', error);
-                }
-            });
-
-            this.wsConnection.on('close', () => {
-                console.log('[SpeechToTextService] WebSocket closed');
-                this.attemptReconnect();
-            });
-
-            this.wsConnection.on('error', (error) => {
-                console.error('[SpeechToTextService] WebSocket error:', error);
-                this.attemptReconnect();
-            });
-
-        } catch (error) {
-            console.error('[SpeechToTextService] Error setting up WebSocket:', error);
-        }
-    }
-
-    private attemptReconnect() {
-        if (this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
-            this.reconnectAttempts++;
-            console.log(`[SpeechToTextService] Attempting to reconnect (${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})`);
-            setTimeout(() => this.setupWebSocket(), 1000 * this.reconnectAttempts);
-        }
     }
 
     // Register events to create a transcription process for each peer. These processes are killed when the peer leaves the room.
@@ -158,10 +113,12 @@ class SpeechToTextService extends ServiceController {
                     const processPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'transcribe_local.py');
                     console.log(`[SpeechToTextService] Launching Python script at: ${processPath}`);
                     
+                    console.log(`[SpeechToTextService] Using activity ID: ${this.activityId}`);
                     this.registerChildProcess(peer.uuid, pythonCommand, [
                         '-u',
                         processPath,
                         '--peer', peer.uuid,
+                        '--activity_id', this.activityId,
                         '--debug'
                     ]);
                     
@@ -210,23 +167,20 @@ class SpeechToTextService extends ServiceController {
             
             // Log first few packets
             if (bytesReceived < 10000) {
-                console.log(`[SpeechToTextService] Received ${data.length} bytes of audio data from Unity`);
-                // Log first 10 bytes to see what's in the data
-                if (data.length > 0) {
-                    console.log(`[SpeechToTextService] First 10 bytes: ${data.subarray(0, 10).toString('hex')}`);
-                }
+                console.log(`[SpeechToTextService] Received ${data.length} bytes of audio data`);
             }
+            
+            console.log('[STT Service] Received audio chunk:', {
+                length: data.length,
+                firstBytes: Array.from(data.subarray(0, 4)),
+                peer: identifier
+            });
             
             return this.originalSendToChildProcess(identifier, data);
         };
     }
 
     async sendToChildProcess(identifier: string, data: Buffer): Promise<boolean> {
-        if (!this.wsConnection || this.wsConnection.readyState !== WebSocket.OPEN) {
-            console.error('[SpeechToTextService] WebSocket not connected');
-            return false;
-        }
-
         try {
             // Add to buffer
             if (!this.audioBuffer.has(identifier)) {
@@ -238,14 +192,23 @@ class SpeechToTextService extends ServiceController {
             // Send when buffer is full
             if (this.audioBuffer.get(identifier)!.length >= this.BUFFER_SIZE) {
                 const audioData = this.audioBuffer.get(identifier)!;
-                console.log(`[SpeechToTextService] Sending ${audioData.length} bytes of buffered audio data to WebSocket`);
+                console.log(`[SpeechToTextService] Sending audio buffer (${audioData.length} bytes) to Python process`);
                 
-                // Log first few bytes to verify data format
-                if (audioData.length > 0) {
-                    console.log(`[SpeechToTextService] First 10 bytes: ${Buffer.from(audioData.subarray(0, 10)).toString('hex')}`);
+                // Write directly to the Python process's stdin
+                const process = this.childProcesses[identifier];
+                if (process && process.stdin) {
+                    try {
+                        process.stdin.write(audioData);
+                        console.log(`[SpeechToTextService] Successfully wrote ${audioData.length} bytes to Python process`);
+                    } catch (writeError) {
+                        console.error(`[SpeechToTextService] Error writing to Python process:`, writeError);
+                        return false;
+                    }
+                } else {
+                    console.error(`[SpeechToTextService] No process or stdin available for peer ${identifier}`);
+                    return false;
                 }
                 
-                this.wsConnection.send(audioData);
                 this.audioBuffer.set(identifier, new Uint8Array(0));
             }
             

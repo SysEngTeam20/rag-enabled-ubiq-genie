@@ -24,25 +24,26 @@ def log(message):
     print(f"[DEBUG] {timestamp} - {message}", flush=True)
 
 class LocalSTTClient:
-    def __init__(self, peer_id, debug=False):
+    def __init__(self, peer_id, activity_id, debug=False):
         self.peer_id = peer_id
+        self.activity_id = activity_id
         self.debug = debug
         self.ws = None
         self.connected = False
-        self.server_url = "ws://localhost:5001/stt/ws"
+        self.server_url = f"ws://localhost:5001/stt/ws/{activity_id}"
         
     def on_message(self, ws, message):
-        """Handle incoming messages from the STT server"""
         try:
             data = json.loads(message)
-            if 'text' in data and data['text'].strip():
-                # Format the transcription with '>' prefix
-                print(f">{data['text']}", flush=True)
-                if self.debug:
-                    log(f"Received transcription: {data['text']}")
+            if data.get('type') == 'transcription':
+                transcription = data.get('text', '')
+                if transcription:
+                    log(f"Received transcription: {transcription}")
+                    # Send transcription to Node.js process
+                    sys.stdout.write(f">{transcription}\n")
+                    sys.stdout.flush()
         except Exception as e:
             log(f"Error processing message: {e}")
-            log(f"Raw message: {message}")
             
     def on_error(self, ws, error):
         """Handle WebSocket errors"""
@@ -51,7 +52,7 @@ class LocalSTTClient:
         
     def on_close(self, ws, close_status_code, close_msg):
         """Handle WebSocket connection close"""
-        log(f"WebSocket connection closed with status {close_status_code}: {close_msg}")
+        log(f"WebSocket connection closed: {close_status_code} - {close_msg}")
         self.connected = False
         
     def on_open(self, ws):
@@ -61,37 +62,25 @@ class LocalSTTClient:
         
     def connect(self):
         """Connect to the STT server"""
-        websocket.enableTrace(self.debug)
-        log(f"Connecting to STT server at {self.server_url}")
-        
-        # Add custom headers for authentication
-        headers = {
-            'User-Agent': 'LocalSTTClient/1.0',
-            'Origin': 'http://localhost:5001'
-        }
-        
+        log(f"Connecting to WebSocket server: {self.server_url}")
         self.ws = websocket.WebSocketApp(
             self.server_url,
-            header=headers,
             on_message=self.on_message,
             on_error=self.on_error,
             on_close=self.on_close,
             on_open=self.on_open
         )
-        
         # Start WebSocket connection in a separate thread
         wst = threading.Thread(target=self.ws.run_forever)
         wst.daemon = True
         wst.start()
         
-        # Wait for connection with exponential backoff
+        # Wait for connection with timeout
         timeout = 5
-        backoff = 0.1
         while not self.connected and timeout > 0:
-            time.sleep(backoff)
-            timeout -= backoff
-            backoff = min(backoff * 2, 1.0)  # Exponential backoff up to 1 second
-            log(f"Waiting for WebSocket connection... ({timeout:.1f}s remaining)")
+            time.sleep(0.1)
+            timeout -= 0.1
+            log("Waiting for WebSocket connection...")
             
         if not self.connected:
             log("Failed to connect to STT server")
@@ -103,13 +92,14 @@ class LocalSTTClient:
 def main():
     parser = argparse.ArgumentParser(description='Local STT Client')
     parser.add_argument('--peer', required=True, help='Peer ID')
+    parser.add_argument('--activity_id', required=True, help='Activity ID')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     args = parser.parse_args()
     
-    log(f"Starting Local STT Client for peer: {args.peer}")
+    log(f"Starting Local STT Client for peer: {args.peer} with activity ID: {args.activity_id}")
     
     # Initialize STT client
-    client = LocalSTTClient(args.peer, args.debug)
+    client = LocalSTTClient(args.peer, args.activity_id, args.debug)
     
     # Connect to STT server
     if not client.connect():
@@ -120,6 +110,7 @@ def main():
     
     try:
         # Read audio data from stdin
+        bytes_read = 0
         while True:
             try:
                 # Read raw audio data (PCM format)
@@ -127,9 +118,21 @@ def main():
                 if not audio_data:
                     break
                     
+                bytes_read += len(audio_data)
+                if bytes_read < 10000:  # Log first few chunks
+                    log(f"Read {len(audio_data)} bytes from stdin (total: {bytes_read})")
+                    
                 # Send audio data to STT server
                 if client.connected and client.ws:
-                    client.ws.send(audio_data)
+                    try:
+                        # Send as binary data
+                        client.ws.send(audio_data, websocket.ABNF.OPCODE_BINARY)
+                        if bytes_read < 10000:  # Log first few sends
+                            log(f"Sent {len(audio_data)} bytes to STT server")
+                    except Exception as e:
+                        log(f"Error sending audio data to STT server: {e}")
+                else:
+                    log("WebSocket not connected, dropping audio data")
                     
             except Exception as e:
                 log(f"Error processing audio data: {e}")
@@ -140,6 +143,7 @@ def main():
     finally:
         if client.ws:
             client.ws.close()
+            log("WebSocket connection closed")
 
 if __name__ == "__main__":
     main() 

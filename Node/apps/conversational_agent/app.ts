@@ -19,9 +19,17 @@ export class ConversationalAgent extends ApplicationController {
     } = {};
     targetPeer: string = '';
     private activityId: string;
-    private readonly SPEECH_THRESHOLD = 1000; // Threshold for speech detection
-    private readonly MIN_SPEECH_DURATION = 0.1; // Minimum duration of speech in seconds
-    private speechBuffer: Map<string, { buffer: Uint8Array, startTime: number, isSpeaking: boolean }> = new Map();
+    private readonly SPEECH_THRESHOLD = 20;
+    private readonly MIN_SPEECH_DURATION = 0.1; // 500ms
+    private readonly MAX_PAUSE_DURATION = 0.7; // 500ms
+    private readonly MIN_BUFFER_SIZE = 0; // 48,000 bytes for 0.5s
+    private speechBuffer: Map<string, { 
+        buffer: Uint8Array, 
+        startTime: number, 
+        isSpeaking: boolean,
+        lastSpeechTime: number,
+        totalDuration: number
+    }> = new Map();
 
     constructor(configFile: string = 'config.json') {
         console.log('[ConversationalAgent] Initializing with config file:', configFile);
@@ -33,6 +41,8 @@ export class ConversationalAgent extends ApplicationController {
         // Get activityId from environment variable with a default value
         this.activityId = process.env.ACTIVITY_ID || '5d2f8b7b-f1bf-4f8f-8f39-85649045fd45';
         this.log(`Initializing Conversational Agent for activity: ${this.activityId}`);
+
+        setTimeout(() => this.testAudioPipeline(), 5000);
     }
 
     start(): void {
@@ -83,7 +93,7 @@ export class ConversationalAgent extends ApplicationController {
             console.log('[ConversationalAgent] MediaReceiver initialized');
 
             // A SpeechToTextService to transcribe audio coming from peers
-            this.components.speech2text = new SpeechToTextService(this.scene);
+            this.components.speech2text = new SpeechToTextService(this.scene, 'SpeechToTextService', this.activityId);
             console.log('[ConversationalAgent] SpeechToTextService initialized');
 
             // A TextGenerationService to generate text based on text
@@ -129,44 +139,66 @@ export class ConversationalAgent extends ApplicationController {
             // Convert audio data to buffer
             const sampleBuffer = Buffer.from(data.samples.buffer);
             
-            // Calculate audio level
-            let sum = 0;
+            // Calculate audio level using RMS instead of simple average
+            let sumOfSquares = 0;
             for (let i = 0; i < data.samples.length; i++) {
-                sum += Math.abs(data.samples[i]);
+                sumOfSquares += data.samples[i] ** 2;
             }
-            const avgLevel = sum / data.samples.length;
+            const rms = Math.sqrt(sumOfSquares / data.samples.length);
+            console.log(`[MediaReceiver] Audio RMS: ${rms.toFixed(1)}`);
 
             // Initialize speech buffer for this peer if not exists
             if (!this.speechBuffer.has(uuid)) {
                 this.speechBuffer.set(uuid, {
                     buffer: new Uint8Array(0),
                     startTime: Date.now(),
-                    isSpeaking: false
+                    isSpeaking: false,
+                    lastSpeechTime: Date.now(),
+                    totalDuration: 0
                 });
             }
 
             const speechState = this.speechBuffer.get(uuid)!;
+            const currentTime = Date.now();
 
             // Check if this is speech
-            if (avgLevel > this.SPEECH_THRESHOLD) {
+            if (rms > this.SPEECH_THRESHOLD) {
                 if (!speechState.isSpeaking) {
-                    console.log(`[MediaReceiver] Speech detected from peer ${uuid}, level: ${avgLevel.toFixed(2)}`);
+                    console.log(`[MediaReceiver] Speech started from peer ${uuid}`);
                     speechState.isSpeaking = true;
-                    speechState.startTime = Date.now();
+                    speechState.startTime = currentTime;
+                    speechState.buffer = new Uint8Array(0);
                 }
+                speechState.lastSpeechTime = currentTime;
+                speechState.totalDuration = (currentTime - speechState.startTime) / 1000;
                 speechState.buffer = new Uint8Array([...speechState.buffer, ...sampleBuffer]);
             } else {
                 if (speechState.isSpeaking) {
-                    // Check if we've been speaking long enough
-                    const duration = (Date.now() - speechState.startTime) / 1000;
-                    if (duration >= this.MIN_SPEECH_DURATION) {
-                        console.log(`[MediaReceiver] Sending speech buffer to STT, duration: ${duration.toFixed(2)}s`);
-                        this.components.speech2text?.sendToChildProcess(uuid, Buffer.from(speechState.buffer));
-                    } else {
-                        console.log(`[MediaReceiver] Speech too short, dropping (${duration.toFixed(2)}s)`);
+                    const silenceDuration = (currentTime - speechState.lastSpeechTime) / 1000;
+                    if (silenceDuration >= this.MAX_PAUSE_DURATION) {
+                        const finalDuration = (currentTime - speechState.startTime) / 1000;
+                        const meetsDuration = finalDuration >= this.MIN_SPEECH_DURATION;
+                        
+                        console.log(`[MediaReceiver] Size check - Needed: 20% (${this.MIN_BUFFER_SIZE*0.2} bytes), Actual: ${finalDuration.toFixed(2)}s`);
+                        
+                        if (speechState.buffer.length > 0) {
+                            if (meetsDuration) {
+                                console.log(`[MediaReceiver] Sending valid speech (${finalDuration.toFixed(2)}s, ${speechState.buffer.length} bytes)`);
+                                this.components.speech2text?.sendToChildProcess(uuid, Buffer.from(speechState.buffer));
+                            } else {
+                                console.log(`[MediaReceiver] Rejected segment - Duration: ${finalDuration.toFixed(2)}s, Size: ${speechState.buffer.length} bytes`, {
+                                    meetsDuration
+                                });
+                            }
+                        }
+                        
+                        // Reset state
+                        speechState.isSpeaking = false;
+                        speechState.buffer = new Uint8Array(0);
+                        speechState.totalDuration = 0;
+                        speechState.startTime = currentTime;
+                        speechState.lastSpeechTime = currentTime;
                     }
-                    speechState.isSpeaking = false;
-                    speechState.buffer = new Uint8Array(0);
                 }
             }
         });
@@ -188,37 +220,97 @@ export class ConversationalAgent extends ApplicationController {
 
         // Step 2: When we receive a response from the transcription service, we send it to the text generation service
         this.components.speech2text?.on('data', (data: Buffer, identifier: string) => {
-            const peer = this.roomClient.peers.get(identifier);
-            const peerName = peer?.properties.get('ubiq.displayname') || 'User';
-            let response = data.toString().replace(/(\r\n|\n|\r)/gm, '');
-            
-            if (response.startsWith('>')) {
-                response = response.slice(1);
-                if (response.trim()) {
-                    const message = (peerName + ' -> Agent:: ' + response).trim();
-                    this.log(message);
-
-                    // Pass activityId with each message
-                    console.log('[ConversationalAgent] Sending to text generation:', {
-                        message,
-                        activityId: this.activityId,
-                        hasService: !!this.components.textGenerationService,
-                        serviceState: {
-                            pid: this.components.textGenerationService?.childProcesses['default']?.pid,
-                            killed: this.components.textGenerationService?.childProcesses['default']?.killed
-                        }
-                    });
-                    
-                    try {
-                        const result = this.components.textGenerationService?.sendToChildProcess(
-                            'default',
-                            Buffer.from(JSON.stringify({ content: message }))
-                        );
-                        console.log('[ConversationalAgent] Text generation send result:', result);
-                    } catch (error) {
-                        console.error('[ConversationalAgent] Error sending to text generation:', error);
-                    }
+            try {
+                // Get peer information
+                const peer = this.roomClient.peers.get(identifier);
+                if (!peer) {
+                    console.log(`[ConversationalAgent] Received STT data for unknown peer: ${identifier}`);
+                    return;
                 }
+
+                const peerName = peer.properties.get('ubiq.displayname') || 'User';
+                
+                // Clean and validate the response
+                let response = data.toString().trim();
+                
+                // Skip debug messages
+                if (response.startsWith('[DEBUG]')) {
+                    console.log('[ConversationalAgent] Skipping debug message:', response);
+                    return;
+                }
+
+                console.log('[ConversationalAgent] Raw STT response:', {
+                    response,
+                    length: response.length,
+                    peer: peerName,
+                    identifier,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Only process responses starting with '>'
+                if (!response.startsWith('>')) {
+                    console.log('[ConversationalAgent] Ignoring non-transcription response:', response);
+                    return;
+                }
+
+                // Remove the '>' prefix and clean the response
+                response = response.slice(1).trim();
+                if (!response) {
+                    console.log('[ConversationalAgent] Empty transcription after cleaning');
+                    return;
+                }
+
+                // Format the message for the agent
+                const message = `${peerName} -> Agent:: ${response}`;
+                console.log('[ConversationalAgent] Formatted message:', {
+                    message,
+                    peer: peerName,
+                    response,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Log the message
+                this.log(message);
+
+                // Check if text generation service is available
+                if (!this.components.textGenerationService) {
+                    console.error('[ConversationalAgent] Text generation service not available');
+                    return;
+                }
+
+                // Send to text generation service
+                const payload = JSON.stringify({ 
+                    content: message,
+                    activityId: this.activityId,
+                    timestamp: new Date().toISOString()
+                });
+
+                console.log('[ConversationalAgent] Sending to text generation:', {
+                    message,
+                    activityId: this.activityId,
+                    payloadLength: payload.length,
+                    serviceState: {
+                        pid: this.components.textGenerationService.childProcesses['default']?.pid,
+                        killed: this.components.textGenerationService.childProcesses['default']?.killed
+                    }
+                });
+
+                const result = this.components.textGenerationService.sendToChildProcess(
+                    'default',
+                    Buffer.from(payload)
+                );
+
+                console.log('[ConversationalAgent] Text generation send result:', {
+                    success: result,
+                    timestamp: new Date().toISOString()
+                });
+
+            } catch (error) {
+                console.error('[ConversationalAgent] Error processing STT output:', {
+                    error: error instanceof Error ? error.message : String(error),
+                    identifier,
+                    timestamp: new Date().toISOString()
+                });
             }
         });
 
@@ -281,7 +373,7 @@ export class ConversationalAgent extends ApplicationController {
             }
         });
 
-        // Simplify TTS handling to send raw PCM data
+        // Handle TTS audio output
         this.components.textToSpeechService?.on('data', (data: Buffer, identifier: string) => {
             console.log('[ConversationalAgent] TTS audio data received:', {
                 bytes: data.length,
@@ -292,8 +384,21 @@ export class ConversationalAgent extends ApplicationController {
                 console.log('[ConversationalAgent] Warning: Empty audio data from TTS');
                 return;
             }
+
+            // Get the last peer that spoke to us
+            const lastSpeaker = Array.from(this.speechBuffer.entries())
+                .filter(([_, state]) => state.isSpeaking)
+                .map(([uuid]) => uuid)[0];
+
+            if (!lastSpeaker) {
+                console.log('[ConversationalAgent] Warning: No target peer found for TTS output');
+                return;
+            }
+
+            // Set target peer for this response
+            this.targetPeer = lastSpeaker;
             
-            // Basic info about the audio format
+            // Send audio format information
             this.scene.send(new NetworkId(95), {
                 type: 'AudioData',
                 targetPeer: this.targetPeer,
@@ -304,19 +409,22 @@ export class ConversationalAgent extends ApplicationController {
                 length: data.length
             });
             
-            // Send in reasonably sized chunks
-            const chunkSize = 8000; 
+            // Send audio data in chunks
+            const chunkSize = 8000; // 100ms of audio at 48kHz
+            let sentBytes = 0;
+            
             for (let i = 0; i < data.length; i += chunkSize) {
                 const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
                 this.scene.send(new NetworkId(95), chunk);
+                sentBytes += chunk.length;
                 
-                // This tiny delay helps prevent network congestion
+                // Small delay between chunks to prevent flooding
                 if (i + chunkSize < data.length) {
-                    setTimeout(() => {}, 1);  
+                    setTimeout(() => {}, 5);
                 }
             }
             
-            console.log(`Sent ${Math.ceil(data.length / chunkSize)} chunks of PCM audio`, 'info');
+            console.log(`[ConversationalAgent] Sent ${sentBytes} bytes of TTS audio to peer ${this.targetPeer}`);
         });
     }
 
@@ -343,6 +451,15 @@ export class ConversationalAgent extends ApplicationController {
         } catch (error) {
             console.error('Error sending audio data:', error);
         }
+    }
+
+    private testAudioPipeline() {
+        const testAudio = new Uint8Array(48000).fill(128); // 1s of silence
+        console.log('[TEST] Injecting test audio');
+        this.components.speech2text?.sendToChildProcess(
+            this.roomClient?.peer?.uuid || 'test-peer',
+            Buffer.from(testAudio)
+        );
     }
 }
 
