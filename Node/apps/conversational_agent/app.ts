@@ -26,6 +26,8 @@ export class ConversationalAgent extends ApplicationController {
     private speechStartTime: { [key: string]: number } = {};
     private speechBuffer: { [key: string]: Buffer[] } = {};
     private lastSpeechTime: { [key: string]: number } = {};
+    private lastTTSMessage: string = '';
+    private lastTTSTime: number = 0;
 
     constructor(configFile: string = 'config.json') {
         super(configFile);
@@ -162,14 +164,22 @@ export class ConversationalAgent extends ApplicationController {
                 
                 if (name && message) {
                     this.targetPeer = name.trim();
-                    console.log(`[ConversationalAgent] Sending to TTS: "${message}"`);
+                    const trimmedMessage = message.trim();
+                    
+                    // Check if this is a duplicate message within 1 second
+                    const now = Date.now();
+                    if (trimmedMessage === this.lastTTSMessage && (now - this.lastTTSTime) < 1000) {
+                        console.log('[ConversationalAgent] Skipping duplicate TTS request');
+                        return;
+                    }
+                    
+                    console.log(`[ConversationalAgent] Sending to TTS: "${trimmedMessage}"`);
                     
                     // Only send to TTS if we have a valid message and TTS service
-                    if (message.trim() && this.components.textToSpeechService) {
-                        // Add a small delay to prevent duplicate processing
-                        setTimeout(() => {
-                            this.components.textToSpeechService?.sendToChildProcess('default', message.trim());
-                        }, 100);
+                    if (trimmedMessage && this.components.textToSpeechService) {
+                        this.components.textToSpeechService.sendToChildProcess('default', trimmedMessage);
+                        this.lastTTSMessage = trimmedMessage;
+                        this.lastTTSTime = now;
                     } else {
                         console.warn('[ConversationalAgent] Skipping TTS - no valid message or TTS service not available');
                     }
@@ -183,7 +193,7 @@ export class ConversationalAgent extends ApplicationController {
 
         this.components.textToSpeechService?.on('data', (data: Buffer, identifier: string) => {
             if (data.length > 0) {
-                console.log(`Received TTS audio, length: ${data.length}`);
+                console.log(`[ConversationalAgent] Received TTS audio, length: ${data.length}`);
                 this.scene.send(new NetworkId(95), {
                     type: 'AudioData',
                     targetPeer: this.targetPeer,
