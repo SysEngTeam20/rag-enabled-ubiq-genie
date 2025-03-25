@@ -28,6 +28,15 @@ export class ConversationalAgent extends ApplicationController {
     private lastSpeechTime: { [key: string]: number } = {};
     private lastTTSMessage: string = '';
     private lastTTSTime: number = 0;
+    
+    // Wake word patterns
+    private readonly WAKE_WORDS = [
+        'hi', 'hey', 'ok', 'hello', 'yo', 'greetings', 'alright', 'well', 'so', 'now'
+    ];
+    private readonly GENIE_VARIATIONS = [
+        'genie', 'jeannie', 'jeanie', 'jeany', 'jeeny', 'jeani', 'jeane', 'jeanee',
+        'jini', 'jiny', 'jinee', 'jene', 'jenea', 'jenei', 'jene'
+    ];
 
     constructor(configFile: string = 'config.json') {
         super(configFile);
@@ -137,10 +146,42 @@ export class ConversationalAgent extends ApplicationController {
                     console.log('[ConversationalAgent] No valid text in STT response, skipping text generation');
                     return;
                 }
+
+                // Check for wake word
+                const lowerText = text.toLowerCase();
+                const hasWakeWord = this.WAKE_WORDS.some(wakeWord => 
+                    lowerText.startsWith(wakeWord + ' ') || lowerText.startsWith(wakeWord + ',')
+                );
+                
+                const hasGenie = this.GENIE_VARIATIONS.some(variation => 
+                    lowerText.includes(' ' + variation) || lowerText.includes(',' + variation)
+                );
+
+                if (!hasWakeWord || !hasGenie) {
+                    console.log('[ConversationalAgent] No wake word detected, ignoring message');
+                    return;
+                }
+
+                // Remove wake word and genie variation from the text
+                let cleanedText = text;
+                for (const wakeWord of this.WAKE_WORDS) {
+                    const regex = new RegExp(`^${wakeWord}\\s*[,]?\\s*`, 'i');
+                    cleanedText = cleanedText.replace(regex, '');
+                }
+                for (const variation of this.GENIE_VARIATIONS) {
+                    const regex = new RegExp(`\\s*[,]?\\s*${variation}\\b`, 'i');
+                    cleanedText = cleanedText.replace(regex, '');
+                }
+                cleanedText = cleanedText.trim();
+                
+                if (!cleanedText) {
+                    console.log('[ConversationalAgent] No message content after removing wake word');
+                    return;
+                }
                 
                 const peer = this.roomClient.peers.get(identifier);
                 const peerName = peer?.properties.get('ubiq.displayname') || 'User';
-                const message = `${peerName} -> Agent:: ${text}`;
+                const message = `${peerName} -> Agent:: ${cleanedText}`;
                 console.log(`[ConversationalAgent] Sending to text generation: "${message}"`);
                 
                 if (this.components.textGenerationService) {
