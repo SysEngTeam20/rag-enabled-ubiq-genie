@@ -4,7 +4,7 @@ import { PeerConnectionManager } from 'ubiq-server/components/peerconnectionmana
 // We use the @roamhq/wrtc package as the regular wrtc package has been abandoned :(
 import wrtc from '@roamhq/wrtc';
 import { RTCAudioData, RTCVideoData } from '@roamhq/wrtc/types/nonstandard';
-const { RTCPeerConnection, nonstandard } = wrtc;
+const { RTCPeerConnection, nonstandard, MediaStream } = wrtc;
 const { RTCAudioSink, RTCVideoSink } = nonstandard;
 
 export class MediaReceiver extends EventEmitter {
@@ -23,32 +23,69 @@ export class MediaReceiver extends EventEmitter {
 
         this.peerConnectionManager.addListener('OnPeerConnection', async (component) => {
             let pc = new RTCPeerConnection({
-                // sdpSemantics: 'unified-plan',
+                iceServers: [
+                    {
+                        urls: [
+                            'stun:stun.l.google.com:19302',
+                            'stun:stun1.l.google.com:19302',
+                            'stun:stun2.l.google.com:19302'
+                        ]
+                    }
+                ],
+                iceTransportPolicy: 'all',
+                bundlePolicy: 'max-bundle',
+                rtcpMuxPolicy: 'require',
+                iceCandidatePoolSize: 0
             });
+
+            // Add transceivers to receive audio
+            const stream = new MediaStream();
+            const transceiver = pc.addTransceiver('audio', {
+                direction: 'recvonly',
+                streams: [stream]
+            });
+
+            // Ensure transceiver is properly configured
+            transceiver.direction = 'recvonly';
 
             component.elements = [];
 
             component.makingOffer = false;
             component.ignoreOffer = false;
             component.isSettingRemoteAnswerPending = false;
+            component.hasRenegotiated = false;
 
             // Special handling for dotnet peers
             component.otherPeerId = undefined;
 
-            pc.onicecandidate = ({ candidate }) => component.sendIceCandidate(candidate);
+            pc.onicecandidate = ({ candidate }) => {
+                component.sendIceCandidate(candidate);
+            };
 
+            pc.oniceconnectionstatechange = () => {
+                // If ICE fails, try restarting ICE
+                if (pc.iceConnectionState === 'failed') {
+                    pc.restartIce();
+                }
+            };
+
+            pc.onconnectionstatechange = () => {};
+            pc.onsignalingstatechange = () => {};
             pc.onnegotiationneeded = async () => {
                 try {
                     component.makingOffer = true;
                     const offer = await pc.createOffer();
                     await pc.setLocalDescription(offer);
-                    component.sendSdp(offer);
+                    component.sendSdp(pc.localDescription);
                 } catch (err) {
-                    console.error(err);
+                    console.error(`[MediaReceiver] Error creating offer:`, err);
                 } finally {
                     component.makingOffer = false;
                 }
             };
+
+            // Ensure we have a polite peer
+            component.polite = true;
 
             component.addListener(
                 'OnSignallingMessage',
@@ -63,14 +100,7 @@ export class MediaReceiver extends EventEmitter {
                 }) => {
                     // Special handling for dotnet peers
                     if (component.otherPeerId === undefined) {
-                        component.otherPeerId = m.implementation ? m.implementation : null;
-                        if (component.otherPeerId == 'dotnet') {
-                            // If just one of the two peers is dotnet, the
-                            // non-dotnet peer always takes on the role of polite
-                            // peer as the dotnet implementaton isn't smart enough
-                            // to handle rollback
-                            component.polite = true;
-                        }
+                        component.otherPeerId = m.implementation ? m.implementation : 'unknown';
                     }
 
                     let description = m.type
@@ -91,9 +121,6 @@ export class MediaReceiver extends EventEmitter {
 
                     try {
                         if (description) {
-                            // An offer may come in while we are busy processing SRD(answer).
-                            // In this case, we will be in "stable" by the time the offer is processed
-                            // so it is safe to chain it on our Operations Chain now.
                             const readyForOffer =
                                 !component.makingOffer &&
                                 (pc.signalingState == 'stable' || component.isSettingRemoteAnswerPending);
@@ -104,22 +131,31 @@ export class MediaReceiver extends EventEmitter {
                                 return;
                             }
                             component.isSettingRemoteAnswerPending = description.type == 'answer';
-                            await pc.setRemoteDescription(description); // SRD rolls back as needed
+                            await pc.setRemoteDescription(description);
                             component.isSettingRemoteAnswerPending = false;
                             if (description.type == 'offer') {
                                 const answer = await pc.createAnswer();
                                 await pc.setLocalDescription(answer);
                                 component.sendSdp(answer);
+                            } else if (description.type === 'answer') {
+                                if (!component.hasRenegotiated) {
+                                    component.hasRenegotiated = true;
+                                    setTimeout(async () => {
+                                        const offer = await pc.createOffer();
+                                        await pc.setLocalDescription(offer);
+                                        component.sendSdp(offer);
+                                    }, 1000);
+                                }
                             }
                         } else if (candidate) {
                             try {
                                 await pc.addIceCandidate(candidate);
-                            } catch (err) {
-                                if (!component.ignoreOffer) throw err; // Suppress ignored offer's candidates
+                            } catch (e: any) {
+                                console.error(`[MediaReceiver] Error adding ICE candidate:`, e.message);
                             }
                         }
                     } catch (err) {
-                        console.error(err);
+                        console.error(`[MediaReceiver] Error processing signaling message:`, err);
                     }
                 }
             );
@@ -131,7 +167,6 @@ export class MediaReceiver extends EventEmitter {
                         audioSink.ondata = (data: RTCAudioData) => {
                             this.emit('audio', component.uuid, data);
                         };
-
                         break;
                     case 'video':
                         let videoSink = new RTCVideoSink(track);
