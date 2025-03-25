@@ -163,7 +163,16 @@ export class ConversationalAgent extends ApplicationController {
                 if (name && message) {
                     this.targetPeer = name.trim();
                     console.log(`[ConversationalAgent] Sending to TTS: "${message}"`);
-                    this.components.textToSpeechService?.sendToChildProcess('default', message.trim() + '\n');
+                    
+                    // Only send to TTS if we have a valid message and TTS service
+                    if (message.trim() && this.components.textToSpeechService) {
+                        // Add a small delay to prevent duplicate processing
+                        setTimeout(() => {
+                            this.components.textToSpeechService?.sendToChildProcess('default', message.trim());
+                        }, 100);
+                    } else {
+                        console.warn('[ConversationalAgent] Skipping TTS - no valid message or TTS service not available');
+                    }
                 } else {
                     console.warn(`[ConversationalAgent] Invalid text generation response format: "${response}"`);
                 }
