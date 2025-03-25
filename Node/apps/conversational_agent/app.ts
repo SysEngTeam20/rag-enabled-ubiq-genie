@@ -164,21 +164,25 @@ export class ConversationalAgent extends ApplicationController {
                 
                 if (name && message) {
                     this.targetPeer = name.trim();
-                    const trimmedMessage = message.trim();
+                    // Clean up the message by removing any "Agent -> Username::" prefixes
+                    const cleanedMessage = message
+                        .replace(/^Agent -> [^:]+::\s*/g, '') // Remove any "Agent -> Username::" prefixes
+                        .replace(/^[^:]+ -> Agent::\s*/g, '') // Remove any "Username -> Agent::" prefixes
+                        .trim();
                     
                     // Check if this is a duplicate message within 1 second
                     const now = Date.now();
-                    if (trimmedMessage === this.lastTTSMessage && (now - this.lastTTSTime) < 1000) {
+                    if (cleanedMessage === this.lastTTSMessage && (now - this.lastTTSTime) < 1000) {
                         console.log('[ConversationalAgent] Skipping duplicate TTS request');
                         return;
                     }
                     
-                    console.log(`[ConversationalAgent] Sending to TTS: "${trimmedMessage}"`);
+                    console.log(`[ConversationalAgent] Sending to TTS: "${cleanedMessage}"`);
                     
                     // Only send to TTS if we have a valid message and TTS service
-                    if (trimmedMessage && this.components.textToSpeechService) {
-                        this.components.textToSpeechService.sendToChildProcess('default', trimmedMessage);
-                        this.lastTTSMessage = trimmedMessage;
+                    if (cleanedMessage && this.components.textToSpeechService) {
+                        this.components.textToSpeechService.sendToChildProcess('default', cleanedMessage);
+                        this.lastTTSMessage = cleanedMessage;
                         this.lastTTSTime = now;
                     } else {
                         console.warn('[ConversationalAgent] Skipping TTS - no valid message or TTS service not available');
