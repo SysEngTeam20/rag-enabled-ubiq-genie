@@ -76,6 +76,7 @@ export class ConversationalAgent extends ApplicationController {
                     // Reset speech collection
                     this.speechStartTime[uuid] = 0;
                     this.speechBuffer[uuid] = [];
+                    this.components.speech2text?.stopSpeechCollection(uuid);
                 }
                 return;
             }
@@ -84,7 +85,9 @@ export class ConversationalAgent extends ApplicationController {
             if (!this.speechStartTime[uuid]) {
                 this.speechStartTime[uuid] = now;
                 this.speechBuffer[uuid] = [];
+                this.components.speech2text?.startSpeechCollection(uuid);
             }
+            // Only add to buffer if we're above threshold
             this.speechBuffer[uuid].push(Buffer.from(data.samples.buffer));
         });
 
