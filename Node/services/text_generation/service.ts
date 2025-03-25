@@ -160,19 +160,25 @@ export class TextGenerationService extends ServiceController {
         }
 
         try {
+            // Format the message as JSON
+            const message = {
+                content: data.toString().trim(),
+                activityId: this.activityId,
+                peerName: data.toString().trim().split(' -> ')[0] // Extract peer name from the message
+            };
+            
             // Log the exact payload being sent
-            const payload = data.toString();
             console.log('[TextGenerationService] Writing payload to stdin:', {
-                payload,
-                length: payload.length,
+                payload: message,
+                length: JSON.stringify(message).length,
                 timestamp: new Date().toISOString()
             });
 
-            // Write to stdin and ensure it's flushed
+            // Write to stdin without ending the stream
             const stdin = process.stdin;
-            stdin.write(payload + '\n');
-            stdin.end();
-
+            const jsonStr = JSON.stringify(message) + '\n';
+            stdin.write(jsonStr);
+            
             // Wait for the write to complete
             await new Promise((resolve) => {
                 stdin.once('drain', resolve);

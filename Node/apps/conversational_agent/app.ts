@@ -40,10 +40,18 @@ export class ConversationalAgent extends ApplicationController {
     }
 
     registerComponents() {
+        console.log('[ConversationalAgent] Registering components...');
         this.components.mediaReceiver = new MediaReceiver(this.scene);
         this.components.speech2text = new SpeechToTextService(this.scene, 'SpeechToTextService', this.activityId);
         this.components.textGenerationService = new TextGenerationService(this.scene, this.activityId);
         this.components.textToSpeechService = new TextToSpeechService(this.scene);
+        
+        // Verify components are initialized
+        console.log('[ConversationalAgent] Component initialization status:');
+        console.log(`  - MediaReceiver: ${!!this.components.mediaReceiver}`);
+        console.log(`  - Speech2Text: ${!!this.components.speech2text}`);
+        console.log(`  - TextGeneration: ${!!this.components.textGenerationService}`);
+        console.log(`  - TextToSpeech: ${!!this.components.textToSpeechService}`);
     }
 
     definePipeline() {
@@ -101,30 +109,66 @@ export class ConversationalAgent extends ApplicationController {
         });
 
         this.components.speech2text?.on('data', (data: Buffer, identifier: string) => {
-            console.log(`Received STT data: ${data.toString()}`);
-            const peer = this.roomClient.peers.get(identifier);
-            const peerName = peer?.properties.get('ubiq.displayname') || 'User';
-            let response = data.toString().trim();
-
-            if (response.startsWith('>')) {
-                response = response.slice(1).trim();
-                if (response) {
-                    const message = `${peerName} -> Agent:: ${response}`;
-                    console.log(`Sending to text generation: ${message}`);
-                    this.components.textGenerationService?.sendToChildProcess('default', Buffer.from(message + '\n'));
+            try {
+                const response = data.toString().trim();
+                console.log(`[ConversationalAgent] Received STT data: "${response}"`);
+                
+                let text = '';
+                
+                // Handle both JSON and plain text responses
+                if (response.startsWith('{')) {
+                    try {
+                        const jsonResponse = JSON.parse(response);
+                        console.log(`[ConversationalAgent] Parsed STT response:`, jsonResponse);
+                        text = jsonResponse.text;
+                    } catch (error) {
+                        console.error(`[ConversationalAgent] Error parsing JSON response:`, error);
+                        return;
+                    }
+                } else {
+                    // Handle plain text response
+                    text = response;
                 }
+                
+                // Skip if no valid text or if it's a no-speech message
+                if (!text || text === '[No speech detected]') {
+                    console.log('[ConversationalAgent] No valid text in STT response, skipping text generation');
+                    return;
+                }
+                
+                const peer = this.roomClient.peers.get(identifier);
+                const peerName = peer?.properties.get('ubiq.displayname') || 'User';
+                const message = `${peerName} -> Agent:: ${text}`;
+                console.log(`[ConversationalAgent] Sending to text generation: "${message}"`);
+                
+                if (this.components.textGenerationService) {
+                    console.log('[ConversationalAgent] Text generation service exists, sending data...');
+                    this.components.textGenerationService.sendToChildProcess('default', Buffer.from(message));
+                } else {
+                    console.error('[ConversationalAgent] Text generation service is not initialized!');
+                }
+            } catch (error) {
+                console.error(`[ConversationalAgent] Error processing STT response:`, error);
             }
         });
 
         this.components.textGenerationService?.on('data', (data: Buffer, identifier: string) => {
-            console.log(`Received text generation: ${data.toString()}`);
-            const response = data.toString().trim();
-            const [, name, message] = response.match(/-> (.*?):: (.*)/) || [];
-
-            if (name && message) {
-                this.targetPeer = name.trim();
-                console.log(`Sending to TTS: ${message}`);
-                this.components.textToSpeechService?.sendToChildProcess('default', message.trim() + '\n');
+            try {
+                const response = data.toString().trim();
+                console.log(`[ConversationalAgent] Received text generation: "${response}"`);
+                
+                // Extract the name and message from the response
+                const [, name, message] = response.match(/-> (.*?):: (.*)/) || [];
+                
+                if (name && message) {
+                    this.targetPeer = name.trim();
+                    console.log(`[ConversationalAgent] Sending to TTS: "${message}"`);
+                    this.components.textToSpeechService?.sendToChildProcess('default', message.trim() + '\n');
+                } else {
+                    console.warn(`[ConversationalAgent] Invalid text generation response format: "${response}"`);
+                }
+            } catch (error) {
+                console.error(`[ConversationalAgent] Error processing text generation response:`, error);
             }
         });
 

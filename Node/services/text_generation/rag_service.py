@@ -246,14 +246,15 @@ if __name__ == "__main__":
                 try:
                     log("Waiting for input from stdin...")
                     line = sys.stdin.buffer.readline()
-                    log(f"Received {len(line)} bytes from stdin")
                     
-                    if len(line) == 0 or line.isspace():
-                        log("Received empty line, continuing...")
+                    # Skip empty lines without logging
+                    if not line or line.isspace():
                         continue
                         
+                    log(f"Received {len(line)} bytes from stdin")
+                    log(f"Raw input received: {line}")
+                    
                     try:
-                        log(f"Raw input received: {line}")
                         message = json.loads(line.decode("utf-8"))
                         log(f"Parsed message: {message}")
                         
