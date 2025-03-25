@@ -22,8 +22,10 @@ export class ConversationalAgent extends ApplicationController {
     private readonly COOLDOWN_MS = 1000; // 1 seconds between processing
     private readonly AMPLITUDE_THRESHOLD = 100; // Adjusted based on observed speech values
     private readonly MIN_DURATION_MS = 200; // Minimum speech duration
+    private readonly SILENCE_THRESHOLD_MS = 1500; // Time of silence before processing speech
     private speechStartTime: { [key: string]: number } = {};
     private speechBuffer: { [key: string]: Buffer[] } = {};
+    private lastSpeechTime: { [key: string]: number } = {};
 
     constructor(configFile: string = 'config.json') {
         super(configFile);
@@ -66,20 +68,27 @@ export class ConversationalAgent extends ApplicationController {
                 // If we were collecting speech, check if we should process it
                 if (this.speechStartTime[uuid]) {
                     const duration = now - this.speechStartTime[uuid];
-                    if (duration >= this.MIN_DURATION_MS) {
+                    const silenceDuration = now - (this.lastSpeechTime[uuid] || 0);
+                    
+                    // Only process if we've had enough silence or the speech is long enough
+                    if (silenceDuration >= this.SILENCE_THRESHOLD_MS || duration >= 5000) {
                         // Process accumulated speech
                         const combinedBuffer = Buffer.concat(this.speechBuffer[uuid].map(b => new Uint8Array(b)));
                         console.log(`Speech detected - duration: ${duration}ms, amplitude: ${avgAmplitude.toFixed(2)}`);
                         this.lastProcessedTime[uuid] = now;
                         this.components.speech2text?.sendToChildProcess(uuid, combinedBuffer);
+                        
+                        // Reset speech collection
+                        this.speechStartTime[uuid] = 0;
+                        this.speechBuffer[uuid] = [];
+                        this.components.speech2text?.stopSpeechCollection(uuid);
                     }
-                    // Reset speech collection
-                    this.speechStartTime[uuid] = 0;
-                    this.speechBuffer[uuid] = [];
-                    this.components.speech2text?.stopSpeechCollection(uuid);
                 }
                 return;
             }
+
+            // Update last speech time
+            this.lastSpeechTime[uuid] = now;
 
             // Start or continue collecting speech
             if (!this.speechStartTime[uuid]) {
