@@ -205,10 +205,19 @@ export class ConversationalAgent extends ApplicationController {
                 
                 if (name && message) {
                     this.targetPeer = name.trim();
-                    // Clean up the message by removing any "Agent -> Username::" prefixes
+                    // Clean up the message by removing all possible prefixes and formats
                     const cleanedMessage = message
-                        .replace(/^Agent -> [^:]+::\s*/g, '') // Remove any "Agent -> Username::" prefixes
-                        .replace(/^[^:]+ -> Agent::\s*/g, '') // Remove any "Username -> Agent::" prefixes
+                        // Remove any "Agent -> Username::" prefixes
+                        .replace(/^Agent\s*->\s*[^:]+::\s*/g, '')
+                        // Remove any "Username -> Agent::" prefixes
+                        .replace(/^[^:]+ -> Agent::\s*/g, '')
+                        // Remove any remaining "Agent -> Username:" patterns
+                        .replace(/Agent\s*->\s*[^:]+:\s*/g, '')
+                        // Remove any remaining "Username -> Agent:" patterns
+                        .replace(/[^:]+ -> Agent:\s*/g, '')
+                        // Remove any remaining "->" patterns
+                        .replace(/->\s*[^:]+::?\s*/g, '')
+                        // Clean up any remaining whitespace
                         .trim();
                     
                     // Check if this is a duplicate message within 1 second
