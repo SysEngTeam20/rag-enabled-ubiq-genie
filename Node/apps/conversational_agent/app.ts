@@ -34,8 +34,8 @@ export class ConversationalAgent extends ApplicationController {
         'hi', 'hey', 'ok', 'hello', 'yo', 'greetings', 'alright', 'well', 'so', 'now'
     ];
     private readonly GENIE_VARIATIONS = [
-        'genie', 'jeannie', 'jeanie', 'jeany', 'jeeny', 'jeani', 'jeane', 'jeanee',
-        'jini', 'jiny', 'jinee', 'jene', 'jenea', 'jenei', 'jene'
+        'genie', 'jeannie', 'jeanie', 'jeany', 'jeeny', 'jeani', 'jeane', 'jeanee', 'jeannie', 'jeanni', 'jinnie', 'jini', 'jiny', 'jinee', 'jene', 'jenea', 'jenei', 'jene', 'jimmy',
+        'jini', 'jiny', 'jinee', 'jene', 'jenea', 'jenei', 'jene', 'gini', 'allen', 'alan', 'allan', 'alen'
     ];
 
     constructor(configFile: string = 'config.json') {
@@ -157,7 +157,8 @@ export class ConversationalAgent extends ApplicationController {
                     lowerText.includes(' ' + variation) || lowerText.includes(',' + variation)
                 );
 
-                if (!hasWakeWord || !hasGenie) {
+                // if (!hasWakeWord || !hasGenie) {
+                if (!hasGenie) {
                     console.log('[ConversationalAgent] No wake word detected, ignoring message');
                     return;
                 }
