@@ -7,89 +7,136 @@ import { RTCAudioData, RTCVideoData } from '@roamhq/wrtc/types/nonstandard';
 const { RTCPeerConnection, nonstandard, MediaStream } = wrtc;
 const { RTCAudioSink, RTCVideoSink } = nonstandard;
 
+interface AudioSink {
+    stop: () => void;
+    ondata: (data: RTCAudioData) => void;
+}
+
+interface VideoSink {
+    stop: () => void;
+    onframe: (data: RTCVideoData) => void;
+}
+
 export class MediaReceiver extends EventEmitter {
     context: any;
     peerConnectionManager: PeerConnectionManager;
+    private peerConnections: Map<string, RTCPeerConnection> = new Map();
+    private audioSinks: Map<string, AudioSink> = new Map();
+    private videoSinks: Map<string, VideoSink> = new Map();
 
     constructor(scene: any) {
         super();
         this.peerConnectionManager = new PeerConnectionManager(scene);
 
         this.peerConnectionManager.addListener('OnPeerConnectionRemoved', (component) => {
-            for (let element of component.elements) {
-                element.remove();
+            try {
+                if (!component) {
+                    console.warn('[MediaReceiver] Received null component in OnPeerConnectionRemoved');
+                    return;
+                }
+
+                // Clean up peer connection
+                const peerId = component.peerId;
+                if (peerId) {
+                    const pc = this.peerConnections.get(peerId);
+                    if (pc) {
+                        pc.close();
+                        this.peerConnections.delete(peerId);
+                    }
+
+                    // Clean up audio sink
+                    const audioSink = this.audioSinks.get(peerId);
+                    if (audioSink) {
+                        audioSink.stop();
+                        this.audioSinks.delete(peerId);
+                    }
+
+                    // Clean up video sink
+                    const videoSink = this.videoSinks.get(peerId);
+                    if (videoSink) {
+                        videoSink.stop();
+                        this.videoSinks.delete(peerId);
+                    }
+                }
+
+                // Clean up any elements if they exist
+                if (component.elements && Array.isArray(component.elements)) {
+                    for (const element of component.elements) {
+                        if (element && typeof element.remove === 'function') {
+                            element.remove();
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('[MediaReceiver] Error in OnPeerConnectionRemoved:', error);
             }
         });
 
         this.peerConnectionManager.addListener('OnPeerConnection', async (component) => {
-            let pc = new RTCPeerConnection({
-                iceServers: [
-                    {
-                        urls: [
-                            'stun:stun.l.google.com:19302',
-                            'stun:stun1.l.google.com:19302',
-                            'stun:stun2.l.google.com:19302'
-                        ]
+            try {
+                if (!component) {
+                    console.warn('[MediaReceiver] Received null component in OnPeerConnection');
+                    return;
+                }
+
+                const peerId = component.peerId;
+                if (!peerId) {
+                    console.warn('[MediaReceiver] No peer ID in component');
+                    return;
+                }
+
+                let pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                });
+
+                this.peerConnections.set(peerId, pc);
+
+                // Set up audio handling
+                pc.ontrack = (event) => {
+                    if (event.track.kind === 'audio') {
+                        const audioSink = new RTCAudioSink(event.track) as AudioSink;
+                        this.audioSinks.set(peerId, audioSink);
+                        
+                        audioSink.ondata = (data: RTCAudioData) => {
+                            this.emit('audio', peerId, data);
+                        };
+                    } else if (event.track.kind === 'video') {
+                        const videoSink = new RTCVideoSink(event.track) as VideoSink;
+                        this.videoSinks.set(peerId, videoSink);
+                        
+                        videoSink.onframe = (data: RTCVideoData) => {
+                            this.emit('video', peerId, data);
+                        };
                     }
-                ],
-                iceTransportPolicy: 'all',
-                bundlePolicy: 'max-bundle',
-                rtcpMuxPolicy: 'require',
-                iceCandidatePoolSize: 0
-            });
+                };
 
-            // Add transceivers to receive audio
-            const stream = new MediaStream();
-            const transceiver = pc.addTransceiver('audio', {
-                direction: 'recvonly',
-                streams: [stream]
-            });
+                // Handle ICE candidates
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        component.sendIce(event.candidate);
+                    }
+                };
 
-            // Ensure transceiver is properly configured
-            transceiver.direction = 'recvonly';
+                // Handle connection state changes
+                pc.onconnectionstatechange = () => {
+                    console.log(`[MediaReceiver] Connection state for peer ${peerId}: ${pc.connectionState}`);
+                };
 
-            component.elements = [];
+                // Handle negotiation needed
+                pc.onnegotiationneeded = async () => {
+                    try {
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+                        component.sendSdp(offer);
+                    } catch (error) {
+                        console.error(`[MediaReceiver] Error creating offer for peer ${peerId}:`, error);
+                    }
+                };
 
-            component.makingOffer = false;
-            component.ignoreOffer = false;
-            component.isSettingRemoteAnswerPending = false;
-            component.hasRenegotiated = false;
-
-            // Special handling for dotnet peers
-            component.otherPeerId = undefined;
-
-            pc.onicecandidate = ({ candidate }) => {
-                component.sendIceCandidate(candidate);
-            };
-
-            pc.oniceconnectionstatechange = () => {
-                // If ICE fails, try restarting ICE
-                if (pc.iceConnectionState === 'failed') {
-                    pc.restartIce();
-                }
-            };
-
-            pc.onconnectionstatechange = () => {};
-            pc.onsignalingstatechange = () => {};
-            pc.onnegotiationneeded = async () => {
-                try {
-                    component.makingOffer = true;
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
-                    component.sendSdp(pc.localDescription);
-                } catch (err) {
-                    console.error(`[MediaReceiver] Error creating offer:`, err);
-                } finally {
-                    component.makingOffer = false;
-                }
-            };
-
-            // Ensure we have a polite peer
-            component.polite = true;
-
-            component.addListener(
-                'OnSignallingMessage',
-                async (m: {
+                // Handle incoming SDP
+                component.addListener('OnSdp', async (m: {
                     implementation: any;
                     type: any;
                     sdp: any;
@@ -98,83 +145,76 @@ export class MediaReceiver extends EventEmitter {
                     sdpMLineIndex: any;
                     usernameFragment: any;
                 }) => {
-                    // Special handling for dotnet peers
-                    if (component.otherPeerId === undefined) {
-                        component.otherPeerId = m.implementation ? m.implementation : 'unknown';
-                    }
-
-                    let description = m.type
-                        ? {
-                              type: m.type,
-                              sdp: m.sdp,
-                          }
-                        : undefined;
-
-                    let candidate = m.candidate
-                        ? {
-                              candidate: m.candidate,
-                              sdpMid: m.sdpMid,
-                              sdpMLineIndex: m.sdpMLineIndex,
-                              usernameFragment: m.usernameFragment,
-                          }
-                        : undefined;
-
                     try {
-                        if (description) {
-                            const readyForOffer =
-                                !component.makingOffer &&
-                                (pc.signalingState == 'stable' || component.isSettingRemoteAnswerPending);
-                            const offerCollision = description.type == 'offer' && !readyForOffer;
+                        if (!m || !m.type || !m.sdp) {
+                            console.warn('[MediaReceiver] Invalid SDP message received');
+                            return;
+                        }
 
-                            component.ignoreOffer = !component.polite && offerCollision;
-                            if (component.ignoreOffer) {
-                                return;
-                            }
-                            component.isSettingRemoteAnswerPending = description.type == 'answer';
-                            await pc.setRemoteDescription(description);
-                            component.isSettingRemoteAnswerPending = false;
-                            if (description.type == 'offer') {
-                                const answer = await pc.createAnswer();
-                                await pc.setLocalDescription(answer);
-                                component.sendSdp(answer);
-                            } else if (description.type === 'answer') {
-                                if (!component.hasRenegotiated) {
-                                    component.hasRenegotiated = true;
-                                    setTimeout(async () => {
+                        const description = {
+                            type: m.type,
+                            sdp: m.sdp
+                        };
+
+                        const readyForOffer =
+                            !component.makingOffer &&
+                            (pc.signalingState === 'stable' || component.isSettingRemoteAnswerPending);
+                        const offerCollision = description.type === 'offer' && !readyForOffer;
+
+                        component.ignoreOffer = !component.polite && offerCollision;
+                        if (component.ignoreOffer) {
+                            return;
+                        }
+
+                        component.isSettingRemoteAnswerPending = description.type === 'answer';
+                        await pc.setRemoteDescription(description);
+                        component.isSettingRemoteAnswerPending = false;
+
+                        if (description.type === 'offer') {
+                            const answer = await pc.createAnswer();
+                            await pc.setLocalDescription(answer);
+                            component.sendSdp(answer);
+                        } else if (description.type === 'answer') {
+                            if (!component.hasRenegotiated) {
+                                component.hasRenegotiated = true;
+                                setTimeout(async () => {
+                                    try {
                                         const offer = await pc.createOffer();
                                         await pc.setLocalDescription(offer);
                                         component.sendSdp(offer);
-                                    }, 1000);
-                                }
-                            }
-                        } else if (candidate) {
-                            try {
-                                await pc.addIceCandidate(candidate);
-                            } catch (e: any) {
-                                console.error(`[MediaReceiver] Error adding ICE candidate:`, e.message);
+                                    } catch (error) {
+                                        console.error(`[MediaReceiver] Error in renegotiation for peer ${peerId}:`, error);
+                                    }
+                                }, 1000);
                             }
                         }
-                    } catch (err) {
-                        console.error(`[MediaReceiver] Error processing signaling message:`, err);
+                    } catch (error) {
+                        console.error(`[MediaReceiver] Error handling SDP for peer ${peerId}:`, error);
                     }
-                }
-            );
+                });
 
-            pc.ontrack = ({ track, streams }) => {
-                switch (track.kind) {
-                    case 'audio':
-                        let audioSink = new RTCAudioSink(track);
-                        audioSink.ondata = (data: RTCAudioData) => {
-                            this.emit('audio', component.uuid, data);
-                        };
-                        break;
-                    case 'video':
-                        let videoSink = new RTCVideoSink(track);
-                        videoSink.onframe = (frame: RTCVideoData) => {
-                            this.emit('video', component.uuid, frame);
-                        };
-                }
-            };
+                // Handle ICE candidates
+                component.addListener('OnIce', async (m: {
+                    candidate: any;
+                    sdpMid: any;
+                    sdpMLineIndex: any;
+                    usernameFragment: any;
+                }) => {
+                    try {
+                        if (!m || !m.candidate) {
+                            console.warn('[MediaReceiver] Invalid ICE candidate received');
+                            return;
+                        }
+
+                        await pc.addIceCandidate(m.candidate);
+                    } catch (error) {
+                        console.error(`[MediaReceiver] Error adding ICE candidate for peer ${peerId}:`, error);
+                    }
+                });
+
+            } catch (error) {
+                console.error('[MediaReceiver] Error in OnPeerConnection:', error);
+            }
         });
     }
 }
