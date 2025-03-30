@@ -19,10 +19,10 @@ def log(message):
     print(message, file=sys.stderr, flush=True)
 
 class RAGService:
-    def __init__(self, api_secret_key: str, api_base_url: str, activity_id: str):
+    def __init__(self, api_secret_key: str, api_base_url: str, scene_id: str):
         self.api_secret_key = api_secret_key
         self.api_base_url = api_base_url
-        self.activity_id = activity_id
+        self.scene_id = scene_id
         self.embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-mpnet-base-v2"
         )
@@ -33,7 +33,7 @@ class RAGService:
         self.vectorstore = None
         
         log("Initializing RAG service...")
-        log(f"Activity ID: {activity_id}")
+        log(f"Scene ID: {scene_id}")
         log("Fetching documents...")
           
         try:
@@ -47,13 +47,13 @@ class RAGService:
     def _initialize_vectorstore(self):
         """Load documents and create vectorstore during initialization"""
         try:
-            log(f"Making request to: {self.api_base_url}/api/llm/documents?activityId={self.activity_id}")
-            docs_metadata = self.fetch_documents(self.activity_id)
+            log(f"Making request to: {self.api_base_url}/api/llm/documents?sceneId={self.scene_id}")
+            docs_metadata = self.fetch_documents(self.scene_id)
             log(f"Found {len(docs_metadata)} documents")
             
             # Handle empty documents case
             if not docs_metadata:
-                log("No documents found for this activity - operating in general knowledge mode")
+                log("No documents found for this scene - operating in general knowledge mode")
                 self.vectorstore = None
                 return None
                 
@@ -86,18 +86,18 @@ class RAGService:
             log(traceback.format_exc())
             raise
 
-    def fetch_documents(self, activity_id: str) -> List[Dict]:
+    def fetch_documents(self, scene_id: str) -> List[Dict]:
         """Fetch documents using the token-based authentication"""
         token = jwt_encode(
             {
-                'activityId': activity_id,
+                'sceneId': scene_id,
                 'exp': datetime.utcnow() + timedelta(days=7)
             },
             self.api_secret_key,
             algorithm='HS256'
         )
         
-        url = f"{self.api_base_url}/api/llm/documents?activityId={activity_id}"
+        url = f"{self.api_base_url}/api/llm/documents?sceneId={scene_id}"
         log(f"Making request to: {url}")
         
         response = requests.get(
@@ -211,14 +211,14 @@ if __name__ == "__main__":
         parser.add_argument("--preprompt", type=str, default="")
         parser.add_argument("--prompt_suffix", type=str, default="")
         parser.add_argument("--api_base_url", type=str, required=True)
-        parser.add_argument("--activity_id", type=str, required=True)
+        parser.add_argument("--scene_id", type=str, required=True)
         args = parser.parse_args()
         
         log("Parsed arguments:")
         log(f"  preprompt: {args.preprompt}")
         log(f"  prompt_suffix: {args.prompt_suffix}")
         log(f"  api_base_url: {args.api_base_url}")
-        log(f"  activity_id: {args.activity_id}")
+        log(f"  scene_id: {args.scene_id}")
         
         api_secret_key = 'YrFvjWY7a6RUEZyu'
         if not api_secret_key:
@@ -226,20 +226,16 @@ if __name__ == "__main__":
             sys.exit(1)
         
         log("Initializing RAG service...")
-        log(f"Activity ID: {args.activity_id}")
+        log(f"Scene ID: {args.scene_id}")
         
         try:
             rag_service = RAGService(
                 api_secret_key=api_secret_key,
                 api_base_url=args.api_base_url,
-                activity_id=args.activity_id
+                scene_id=args.scene_id
             )
             log("RAG service initialized successfully!")
             log("Waiting for input messages...")
-            
-            # Test stdin is working
-            log("Testing stdin...")
-            log("Please send a test message...")
             
             # Listen for messages
             while True:
@@ -248,68 +244,52 @@ if __name__ == "__main__":
                     line = sys.stdin.buffer.readline()
                     
                     # Skip empty lines without logging
-                    if not line or line.isspace():
+                    if not line or len(line.strip()) == 0:
                         continue
-                        
-                    log(f"Received {len(line)} bytes from stdin")
-                    log(f"Raw input received: {line}")
                     
-                    try:
-                        message = json.loads(line.decode("utf-8"))
-                        log(f"Parsed message: {message}")
-                        
-                        # Log message details
-                        log(f"Message content: {message.get('content', 'No content')}")
-                        log(f"Activity ID: {message.get('activityId', 'No activity ID')}")
-                        
-                        query = message['content'].strip()
-                        log(f"Processed query: {query}")
-                        
-                        # Get context using preloaded vectorstore
-                        log("Fetching context for query...")
-                        context = rag_service.get_context_for_query(query)
-                        log(f"Retrieved context length: {len(context)} characters")
-                        
-                        # Query LLM with context
-                        log("Querying LLM...")
-                        try:
-                            response = rag_service.query_ollama(
-                                prompt=query,
-                                context=context,
-                                system_prompt=args.preprompt
-                            )
-                            log(f"LLM response received: {response}")
-                            
-                            # Send response back
-                            response_text = f"Agent -> {message.get('peerName', 'User')}:: {response}"
-                            log(f"Sending response: {response_text}")
-                            print(response_text, flush=True)  # Ensure the response is sent immediately
-                            log("Response sent successfully")
-                            
-                        except Exception as e:
-                            log(f"Error during LLM query: {str(e)}")
-                            log(traceback.format_exc())
-                            error_response = f"Agent -> {message.get('peerName', 'User')}:: I apologize, but I encountered an error processing your request."
-                            print(error_response, flush=True)
-                            log("Error response sent")
-                        
-                    except json.JSONDecodeError as e:
-                        log(f"Error decoding JSON message: {e}")
-                        log(f"Raw message: {line}")
-                    except Exception as e:
-                        log(f"Error processing message: {e}")
-                        log(traceback.format_exc())
-                        
+                    # Parse JSON message
+                    log(f"Received input: {line.decode('utf-8').strip()}")
+                    message = json.loads(line.decode('utf-8'))
+                    
+                    # Extract content and scene ID
+                    content = message.get('content', '')
+                    scene_id = message.get('sceneId', '')
+                    
+                    # Verify this message is for our scene
+                    if scene_id != args.scene_id:
+                        log(f"Message scene ID '{scene_id}' doesn't match our scene ID '{args.scene_id}', skipping")
+                        continue
+                    
+                    log(f"Processing message for scene {scene_id}: {content}")
+                    
+                    # Get relevant context from documents
+                    context = rag_service.get_context_for_query(content)
+                    
+                    # Build system prompt
+                    system_prompt = args.preprompt
+                    if args.prompt_suffix:
+                        system_prompt = f"{system_prompt}\n\n{args.prompt_suffix}"
+                    
+                    # Query LLM with context
+                    response = rag_service.query_ollama(content, context, system_prompt)
+                    
+                    # Add scene ID to response
+                    tagged_response = f"Scene: {scene_id}\n{response}"
+                    
+                    # Send response back to Node.js
+                    print(tagged_response, flush=True)
+                    log(f"Sent response for scene {scene_id}")
+                    
+                except json.JSONDecodeError as e:
+                    log(f"Error parsing input as JSON: {str(e)}")
                 except Exception as e:
-                    log(f"Error in main loop: {e}")
+                    log(f"Error processing message: {str(e)}")
                     log(traceback.format_exc())
-                    time.sleep(1)  # Prevent tight loop on error
-                    
         except Exception as e:
-            log(f"Fatal error initializing RAG service: {e}")
+            log(f"Error initializing or running RAG service: {str(e)}")
             log(traceback.format_exc())
             sys.exit(1)
     except Exception as e:
-        log(f"Fatal error: {e}")
+        log(f"Fatal error: {str(e)}")
         log(traceback.format_exc())
         sys.exit(1)

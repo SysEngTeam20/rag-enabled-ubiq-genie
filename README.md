@@ -31,6 +31,37 @@ graph TD
     C -->|No Docs| D
 ```
 
+## Multi-Room Architecture
+
+The system now supports a scalable multi-room architecture where each room corresponds to a unique scene. Key features include:
+
+### Room Management
+- Dynamic room creation and destruction based on client demand
+- Each room has its own scene-specific conversational agent
+- Rooms are automatically cleaned up when all clients leave
+
+### Scene-Specific AI Assistants
+- Each room has dedicated STT, TTS, and RAG services
+- RAG services are scene-specific, retrieving documents relevant to the current scene
+- Scene IDs are used throughout the system instead of static activity IDs
+
+### Usage
+To start the multi-room server:
+```bash
+cd Node
+npm run multi-room-server
+```
+
+Clients can join by:
+1. Connecting to the server
+2. Sending a room join request with a scene ID
+3. If the room exists, they'll join it; otherwise, a new room with that scene ID will be created
+
+### Benefits
+- Scalable architecture supporting multiple concurrent scenes
+- Resource optimization through dynamic room lifecycle management
+- Improved context awareness with scene-specific knowledge bases
+
 ## Requirements
 
 ### Core Dependencies

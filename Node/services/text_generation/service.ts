@@ -5,15 +5,16 @@ import { fileURLToPath } from 'url';
 import * as dotenv from 'dotenv';
 import nconf from 'nconf';
 import { ChildProcess, spawn } from 'child_process';
+import { Logger } from '../../components/logger';
 
 export class TextGenerationService extends ServiceController {
-    private activityId: string;
+    private sceneId: string;
     childProcesses: Record<string, ChildProcess> = {};
 
-    constructor(scene: NetworkScene, activityId: string) {
+    constructor(scene: NetworkScene, sceneId: string) {
         super(scene, 'TextGenerationService');
         
-        this.activityId = activityId;
+        this.sceneId = sceneId;
         
         // Load .env.local file
         dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
@@ -23,7 +24,7 @@ export class TextGenerationService extends ServiceController {
         const apiSecretKey = process.env.API_SECRET_KEY;
         
         if (!apiSecretKey) {
-            this.log('Warning: API_SECRET_KEY not found in environment variables. Some features may not work.');
+            Logger.log('TextGenerationService', 'Warning: API_SECRET_KEY not found in environment variables. Some features may not work.', 'warning');
         }
 
         const pythonProcess = this.registerChildProcess('default', 'python', [
@@ -35,35 +36,22 @@ export class TextGenerationService extends ServiceController {
             nconf.get('prompt_suffix') || '',
             '--api_base_url',
             apiBaseUrl,
-            '--activity_id',
-            this.activityId
+            '--scene_id',
+            this.sceneId
         ]);
 
         // Log process details
-        console.log('[TextGenerationService] Python process details:', {
-            pid: pythonProcess.pid,
-            script: path.join(path.dirname(fileURLToPath(import.meta.url)), 'rag_service.py'),
-            args: [
-                '--preprompt', nconf.get('preprompt') || '',
-                '--prompt_suffix', nconf.get('prompt_suffix') || '',
-                '--api_base_url', apiBaseUrl,
-                '--activity_id', this.activityId
-            ],
-            workingDirectory: process.cwd()
-        });
+        Logger.log('TextGenerationService', 'Python process details:', 'info');
+        Logger.log('TextGenerationService', `  - PID: ${pythonProcess.pid}`, 'info');
+        Logger.log('TextGenerationService', `  - Script: ${path.join(path.dirname(fileURLToPath(import.meta.url)), 'rag_service.py')}`, 'info');
+        Logger.log('TextGenerationService', `  - Scene ID: ${this.sceneId}`, 'info');
 
         // Handle stdout for responses
         if (pythonProcess.stdout) {
             pythonProcess.stdout.on('data', (data: Buffer) => {
                 const response = data.toString().trim();
                 if (response && response.length > 0) {
-                    console.log(`[TextGenerationService] Received response:`, {
-                        content: response,
-                        length: response.length,
-                        timestamp: new Date().toISOString(),
-                        hasContent: response.length > 0,
-                        startsWithAgent: response.startsWith('Agent ->')
-                    });
+                    Logger.log('TextGenerationService', `Received response of length ${response.length} characters`, 'info');
                     this.emit('data', data, 'default');
                 }
             });
@@ -74,88 +62,42 @@ export class TextGenerationService extends ServiceController {
             pythonProcess.stderr.on('data', (data: Buffer) => {
                 const debugMsg = data.toString().trim();
                 if (debugMsg && !debugMsg.includes('Received empty line') && !debugMsg.includes('Received 0 bytes')) {
-                    console.log(`[TextGenerationService] Python process output:`, {
-                        message: debugMsg,
-                        timestamp: new Date().toISOString(),
-                        processState: {
-                            pid: pythonProcess.pid,
-                            killed: pythonProcess.killed,
-                            connected: pythonProcess.connected,
-                            exitCode: pythonProcess.exitCode
-                        }
-                    });
+                    Logger.log('TextGenerationService', `Python process output: ${debugMsg}`, 'info');
                 }
             });
         }
 
         // Handle process errors
         pythonProcess.on('error', (error: Error) => {
-            console.error(`[TextGenerationService] Process error:`, {
-                error: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString(),
-                processState: {
-                    pid: pythonProcess.pid,
-                    killed: pythonProcess.killed,
-                    connected: pythonProcess.connected,
-                    exitCode: pythonProcess.exitCode
-                }
-            });
+            Logger.log('TextGenerationService', `Process error: ${error.message}`, 'error');
         });
 
         pythonProcess.on('exit', (code: number) => {
-            console.log(`[TextGenerationService] Process exited:`, {
-                code,
-                timestamp: new Date().toISOString(),
-                processState: {
-                    pid: pythonProcess.pid,
-                    killed: pythonProcess.killed,
-                    connected: pythonProcess.connected,
-                    exitCode: pythonProcess.exitCode
-                }
-            });
+            Logger.log('TextGenerationService', `Process exited with code ${code}`, 'info');
         });
 
         // Add startup check
         setTimeout(() => {
             if (pythonProcess.killed) {
-                console.error('[TextGenerationService] Python process died during startup');
+                Logger.log('TextGenerationService', 'Python process died during startup', 'error');
             } else {
-                console.log('[TextGenerationService] Python process startup check:', {
-                    pid: pythonProcess.pid,
-                    killed: pythonProcess.killed,
-                    connected: pythonProcess.connected,
-                    exitCode: pythonProcess.exitCode,
-                    timestamp: new Date().toISOString()
-                });
+                Logger.log('TextGenerationService', 'Python process startup check successful', 'info');
             }
         }, 5000);
 
-        this.log(`TextGenerationService initialized for activity: ${this.activityId}`);
+        Logger.log('TextGenerationService', `Service initialized for scene: ${this.sceneId}`, 'info');
     }
 
     public async sendToChildProcess(identifier: string, data: Buffer): Promise<boolean> {
         const process = this.childProcesses[identifier];
         if (!process) {
-            console.error(`[TextGenerationService] No child process found for identifier: ${identifier}`);
+            Logger.log('TextGenerationService', `No child process found for identifier: ${identifier}`, 'error');
             return false;
         }
 
-        // Log detailed process state
-        console.log('[TextGenerationService] Process state:', {
-            pid: process.pid,
-            killed: process.killed,
-            connected: process.connected,
-            stdin: !!process.stdin,
-            stdout: !!process.stdout,
-            stderr: !!process.stderr,
-            exitCode: process.exitCode,
-            timestamp: new Date().toISOString()
-        });
-
         // Verify process is running and connected
         if (process.killed || !process.stdin) {
-            console.error(`[TextGenerationService] Process ${identifier} is not running or stdin is not available`);
+            Logger.log('TextGenerationService', `Process ${identifier} is not running or stdin is not available`, 'error');
             return false;
         }
 
@@ -163,16 +105,12 @@ export class TextGenerationService extends ServiceController {
             // Format the message as JSON
             const message = {
                 content: data.toString().trim(),
-                activityId: this.activityId,
+                sceneId: this.sceneId,
                 peerName: data.toString().trim().split(' -> ')[0] // Extract peer name from the message
             };
             
             // Log the exact payload being sent
-            console.log('[TextGenerationService] Writing payload to stdin:', {
-                payload: message,
-                length: JSON.stringify(message).length,
-                timestamp: new Date().toISOString()
-            });
+            Logger.log('TextGenerationService', `Writing payload to stdin: ${JSON.stringify(message).length} bytes`, 'info');
 
             // Write to stdin without ending the stream
             const stdin = process.stdin;
@@ -184,72 +122,47 @@ export class TextGenerationService extends ServiceController {
                 stdin.once('drain', resolve);
             });
 
-            console.log('[TextGenerationService] Successfully wrote to process stdin');
+            Logger.log('TextGenerationService', 'Successfully wrote to process stdin', 'info');
             return true;
         } catch (error) {
-            console.error(`[TextGenerationService] Error writing to process ${identifier}:`, error);
+            Logger.log('TextGenerationService', `Error writing to process ${identifier}: ${error}`, 'error');
             return false;
         }
     }
 
-    private async verifyProcessStartup(identifier: string): Promise<boolean> {
-        const process = this.childProcesses[identifier];
-        if (!process) return false;
-
-        // Wait for process to be ready
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        // Check process state
-        const state = {
-            pid: process.pid,
-            killed: process.killed,
-            connected: process.connected,
-            exitCode: process.exitCode,
-            timestamp: new Date().toISOString()
-        };
-
-        console.log('[TextGenerationService] Python process startup check:', state);
-
-        return !process.killed && process.exitCode === null;
+    /**
+     * Helper method to send a message to the RAG service
+     * @param message The message to send
+     * @returns true if successful, false otherwise
+     */
+    public async sendMessage(message: string): Promise<boolean> {
+        return this.sendToChildProcess('default', Buffer.from(message));
     }
 
-    private initChildProcess(identifier: string): ChildProcess | null {
-        try {
-            const scriptPath = path.join(__dirname, 'text_generation.py');
-            this.log(`Starting text generation process: ${scriptPath}`);
-            
-            const child = spawn('python3', [scriptPath], {
-                stdio: ['pipe', 'pipe', 'pipe']
-            });
-
-            console.log('[TextGenerationService] Child process created:', {
-                identifier,
-                pid: child.pid,
-                connected: child.connected
-            });
-
-            child.stderr?.on('data', (data) => {
-                const errorMsg = data.toString().trim();
-                console.error(`[TextGenerationService] Child process error:`, {
-                    identifier,
-                    error: errorMsg,
-                    timestamp: new Date().toISOString()
-                });
-                this.emit('error', new Error(`TextGen Error: ${errorMsg}`));
-            });
-
-            child.on('exit', (code) => {
-                console.log(`[TextGenerationService] Child process exited:`, {
-                    identifier,
-                    code,
-                    timestamp: new Date().toISOString()
-                });
-            });
-
-            return child;
-        } catch (error: any) {
-            this.log(`Failed to start text generation process: ${error.message}`, 'error');
-            return null;
-        }
+    /**
+     * Clean up resources when this service is no longer needed
+     */
+    public cleanup(): void {
+        Logger.log('TextGenerationService', `Cleaning up service for scene: ${this.sceneId}`, 'info');
+        
+        // Terminate all child processes
+        Object.entries(this.childProcesses).forEach(([identifier, process]) => {
+            try {
+                if (!process.killed) {
+                    Logger.log('TextGenerationService', `Terminating process for ${identifier}`, 'info');
+                    process.kill();
+                }
+            } catch (error) {
+                Logger.log('TextGenerationService', `Error terminating process for ${identifier}: ${error}`, 'error');
+            }
+        });
+        
+        // Clear the processes map
+        this.childProcesses = {};
+        
+        // Remove all listeners
+        this.removeAllListeners();
+        
+        Logger.log('TextGenerationService', 'Cleanup complete', 'info');
     }
 }
