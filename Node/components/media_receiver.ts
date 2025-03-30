@@ -27,7 +27,7 @@ interface AudioStats {
 }
 
 export class MediaReceiver extends EventEmitter {
-    context: any;
+  context: any;
     peerConnectionManager!: PeerConnectionManager;
     private peerConnections: Map<string, RTCPeerConnection> = new Map();
     private audioSinks: Map<string, AudioSink> = new Map();
@@ -35,7 +35,7 @@ export class MediaReceiver extends EventEmitter {
     private audioStats: Map<string, AudioStats> = new Map();
     private audioLogTimer: NodeJS.Timeout | null = null;
     private readonly AUDIO_LOG_INTERVAL = 2000; // Log every 2 seconds
-    private roomClient: RoomClient | null = null;
+  private roomClient: RoomClient | null = null;
 
     /**
      * Create a new MediaReceiver
@@ -43,7 +43,7 @@ export class MediaReceiver extends EventEmitter {
      * @param roomClient Optional RoomClient to connect with peers in a specific room
      */
     constructor(scene: any, roomClient?: RoomClient) {
-        super();
+    super();
         Logger.log('MediaReceiver', '========== INITIALIZING MEDIA RECEIVER ==========', 'info');
         Logger.log('MediaReceiver', `Scene object valid: ${!!scene}`, 'info');
         
@@ -340,8 +340,8 @@ export class MediaReceiver extends EventEmitter {
 
                             if (description.type === 'offer') {
                                 Logger.log('MediaReceiver', `Creating answer for peer ${peerId}`, 'info');
-                                const answer = await pc.createAnswer();
-                                await pc.setLocalDescription(answer);
+                        const answer = await pc.createAnswer();
+                        await pc.setLocalDescription(answer);
                                 component.sendSdp(answer);
                             } else if (description.type === 'answer') {
                                 if (!component.hasRenegotiated) {
@@ -464,9 +464,9 @@ export class MediaReceiver extends EventEmitter {
         // Check if data is valid
         if (!data || !data.samples || data.samples.length === 0) {
             Logger.log('MediaReceiver', `Received invalid audio data from peer ${peerId}`, 'warning');
-            return;
-        }
-        
+      return;
+    }
+    
         // Always log at least some basic info about receiving audio data
         Logger.log('MediaReceiver', `Received audio data from peer ${peerId}: ${data.samples.length} samples, channels: ${data.channelCount}, sampleRate: ${data.sampleRate}Hz`, 'info');
         
@@ -580,9 +580,9 @@ export class MediaReceiver extends EventEmitter {
             // Check if PeerConnectionManager is working
             if (!this.peerConnectionManager) {
                 Logger.log('MediaReceiver', 'PeerConnectionManager is not initialized', 'error');
-                return;
-            }
-            
+        return;
+      }
+      
             // Check if events are registered
             const hasListeners = typeof this.peerConnectionManager.addListener === 'function';
             Logger.log('MediaReceiver', `PeerConnectionManager has listeners: ${hasListeners}`, 'info');
@@ -609,8 +609,8 @@ export class MediaReceiver extends EventEmitter {
                     } else if (hasEmit) {
                         pcmAny.emit('TestEvent', { test: true });
                         Logger.log('MediaReceiver', 'Successfully emitted test event', 'info');
-                    }
-                } catch (error) {
+      }
+    } catch (error) {
                     Logger.log('MediaReceiver', `Error testing events: ${error}`, 'error');
                 }
             }
