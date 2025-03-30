@@ -278,9 +278,88 @@ export class RoomManager extends EventEmitter {
             throw new Error("Cannot create room: roomClient is null");
         }
         
+        // Try to force the room client to join this specific room
+        Logger.log('RoomManager', `Attempting to ensure room client is joined to room: ${sceneId}`, 'info');
+        
+        // 1. Check current room
+        const currentRoomId = this.getRoomId();
+        Logger.log('RoomManager', `Current room ID from roomClient: ${currentRoomId || 'none'}`, 'info');
+        
+        // 2. If not already in this room, try to join it
+        if (currentRoomId !== sceneId) {
+            try {
+                Logger.log('RoomManager', `Current room (${currentRoomId}) differs from requested (${sceneId}), joining...`, 'info');
+                this.roomClient.join(sceneId);
+                
+                // Wait a bit and then check if we successfully joined
+                setTimeout(() => {
+                    const newRoomId = this.getRoomId();
+                    Logger.log('RoomManager', `After join, room ID is: ${newRoomId || 'none'}`, 'info');
+                    
+                    // If we still don't have the right room ID, try to force it
+                    if (newRoomId !== sceneId) {
+                        Logger.log('RoomManager', `Join may have failed, attempting to force room ID...`, 'info');
+                        this.forceRoomId(sceneId);
+                    }
+                }, 1000);
+            } catch (error) {
+                Logger.log('RoomManager', `Error joining room: ${error}`, 'error');
+                
+                // Try to force the room ID anyway
+                this.forceRoomId(sceneId);
+            }
+        }
+        
         const roomInstance = new RoomInstance(this.scene, this.roomClient, sceneId);
         this.rooms.set(sceneId, roomInstance);
         return roomInstance;
+    }
+    
+    /**
+     * Force a specific room ID on the room client
+     * This is a last resort if normal joining fails
+     */
+    private forceRoomId(roomId: string): void {
+        Logger.log('RoomManager', `Forcing room ID: ${roomId}`, 'info');
+        
+        try {
+            if (!this.roomClient) return;
+            
+            // Try to find the room property
+            if ((this.roomClient as any).room) {
+                const room = (this.roomClient as any).room;
+                
+                // Force UUID if it's an object
+                if (typeof room === 'object') {
+                    if ('uuid' in room) {
+                        Logger.log('RoomManager', `Setting room.uuid = ${roomId}`, 'info');
+                        room.uuid = roomId;
+                    }
+                    if ('id' in room) {
+                        Logger.log('RoomManager', `Setting room.id = ${roomId}`, 'info');
+                        room.id = roomId;
+                    }
+                    if ('roomId' in room) {
+                        Logger.log('RoomManager', `Setting room.roomId = ${roomId}`, 'info');
+                        room.roomId = roomId;
+                    }
+                }
+            }
+            
+            // Try direct property
+            if ('roomId' in this.roomClient) {
+                Logger.log('RoomManager', `Setting roomClient.roomId = ${roomId}`, 'info');
+                (this.roomClient as any).roomId = roomId;
+            }
+            
+            // Verify if it worked
+            setTimeout(() => {
+                const currentRoomId = this.getRoomId();
+                Logger.log('RoomManager', `After forcing, room ID is: ${currentRoomId || 'none'}`, 'info');
+            }, 500);
+        } catch (error) {
+            Logger.log('RoomManager', `Error forcing room ID: ${error}`, 'error');
+        }
     }
 
     /**
@@ -314,37 +393,54 @@ export class RoomManager extends EventEmitter {
         return this.rooms.has(sceneId);
     }
 
-    setRoomClient(roomClient: RoomClient): void {
-        try {
-            Logger.log('RoomManager', 'Setting room client', 'info');
+    /**
+     * Set the room client for the manager
+     * @param roomClient the room client to set
+     */
+    public setRoomClient(roomClient: RoomClient): void {
+        this.roomClient = roomClient;
+        Logger.log('RoomManager', 'RoomClient set on RoomManager', 'info');
+        
+        // Examine the room client to understand its state
+        if (roomClient) {
+            // Check for existing room ID
+            const roomId = this.getRoomId();
+            Logger.log('RoomManager', `RoomClient current room ID: ${roomId || 'not joined'}`, 'info');
             
-            this.roomClient = roomClient;
+            // Check for peers
+            const peerCount = roomClient.peers?.size || 0;
+            Logger.log('RoomManager', `RoomClient has ${peerCount} peers`, 'info');
             
-            // Log room client details
-            Logger.log('RoomManager', `Room client valid: ${!!this.roomClient}`, 'info');
+            // Register for room events
+            Logger.log('RoomManager', 'Setting up room event handlers', 'info');
+            this.setupRoomEventListeners();
             
-            if (this.roomClient) {
-                const peerCount = this.roomClient.peers.size;
-                const roomId = this.getRoomId();
-                Logger.log('RoomManager', `Room client has ${peerCount} peers, current room ID: ${roomId}`, 'info');
-                
-                // Setup room event handlers
-                this.setupRoomEventHandlers();
-                
-                // Create room instance if we already have a valid room
-                this.checkAndCreateRoomInstance();
-                
-                // Start polling for room status to catch any events we might have missed
-                this.startPolling();
-                
-                // Setup event listeners
-                this.setupRoomEventListeners();
+            // Start polling for room status
+            this.startRoomPolling();
+            
+            // If already in a room, create instance immediately
+            if (roomId && this.isValidGuid(roomId)) {
+                Logger.log('RoomManager', `RoomClient already in room ${roomId}, creating room instance`, 'info');
+                this.getOrCreateRoom(roomId);
             }
-        } catch (error) {
-            Logger.log('RoomManager', `ERROR setting room client: ${error}`, 'error');
         }
     }
     
+    /**
+     * Start polling for room status
+     */
+    private startRoomPolling(): void {
+        // Clear any existing poll
+        if (this.pollInterval) {
+            clearInterval(this.pollInterval);
+            this.pollInterval = null;
+        }
+        
+        // Start new polling interval
+        this.pollInterval = setInterval(() => this.pollRoomStatus(), this.POLL_INTERVAL_MS);
+        Logger.log('RoomManager', `Started room polling (every ${this.POLL_INTERVAL_MS}ms)`, 'info');
+    }
+
     private checkAndCreateRoomInstance(): void {
         try {
             // Get current room ID
@@ -475,18 +571,6 @@ export class RoomManager extends EventEmitter {
         } catch (error) {
             Logger.log('RoomManager', `ERROR handling peer updated event: ${error}`, 'error');
         }
-    }
-
-    private startPolling(): void {
-        // Clear any existing interval
-        if (this.pollInterval) {
-            clearInterval(this.pollInterval);
-        }
-        
-        Logger.log('RoomManager', `Starting room status polling (interval: ${this.POLL_INTERVAL_MS}ms)`, 'info');
-        
-        // Start a new polling interval
-        this.pollInterval = setInterval(() => this.pollRoomStatus(), this.POLL_INTERVAL_MS);
     }
 
     addRoom(roomId: string): void {

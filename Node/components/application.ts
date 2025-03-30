@@ -31,8 +31,32 @@ export class ApplicationController {
         Logger.log('ApplicationController', `Loading config from: ${configPath}`, 'info');
         nconf.file(configPath);
         
-        // Create a new NetworkScene
+        // Create a new NetworkScene with proper initialization
         this.scene = new NetworkScene();
+        
+        try {
+            // Add a TCP connection for WebRTC signaling
+            Logger.log('ApplicationController', 'Setting up TCP connection for WebRTC signaling', 'info');
+            
+            // Get the port from config
+            const portConfig = nconf.get('roomserver:tcp:port');
+            const port = typeof portConfig === 'string' ? parseInt(portConfig, 10) : (portConfig || 8009);
+            const uri = nconf.get('roomserver:uri') || 'localhost';
+            Logger.log('ApplicationController', `Using TCP connection: ${uri}:${port}`, 'info');
+            
+            // Use the UbiqTcpConnection function (not a constructor)
+            // UbiqTcpConnection already returns a TcpConnectionWrapper
+            const tcpConnection = UbiqTcpConnection(uri, port);
+            this.connection = tcpConnection; // No need to wrap it again
+            
+            // Connect the scene to the network
+            Logger.log('ApplicationController', 'Connecting NetworkScene to TCP connection', 'info');
+            this.scene.addConnection(tcpConnection);
+            
+            Logger.log('ApplicationController', 'Network connection established successfully', 'info');
+        } catch (error) {
+            Logger.log('ApplicationController', `ERROR setting up network connection: ${error}`, 'error');
+        }
         
         // Initialize RoomManager
         this.roomManager = new RoomManager(this.scene);
@@ -100,6 +124,18 @@ export class ApplicationController {
         try {
             Logger.log('ApplicationController', `Joining room: ${roomId}`, 'info');
             
+            // Add WebRTC diagnostic log
+            Logger.log('ApplicationController', 'DIAGNOSTICS: Checking WebRTC setup...', 'info');
+            
+            // Check if the wrtc package is available
+            try {
+                const wrtc = await import('@roamhq/wrtc');
+                Logger.log('ApplicationController', `WebRTC package loaded successfully: ${!!wrtc}`, 'info');
+                Logger.log('ApplicationController', `RTCPeerConnection available: ${!!wrtc.default.RTCPeerConnection}`, 'info');
+            } catch (error) {
+                Logger.log('ApplicationController', `ERROR loading WebRTC package: ${error}`, 'error');
+            }
+            
             // Start the server if needed and not already started
             if (startServer && !this.serverStarted) {
                 Logger.log('ApplicationController', 'Starting Ubiq server...', 'info');
@@ -110,16 +146,48 @@ export class ApplicationController {
                 Logger.log('ApplicationController', 'Ubiq server started successfully', 'info');
             }
             
-            // Connect to the room
+            // Create a new RoomClient for this specific room join
+            Logger.log('ApplicationController', 'Creating new RoomClient...', 'info');
             const roomClient = new RoomClient(this.scene);
+            this.roomClient = roomClient; // Store at class level for later reference
             
             // Pass the room client to the RoomManager
             Logger.log('ApplicationController', 'Setting room client on RoomManager', 'info');
             this.roomManager.setRoomClient(roomClient);
             
-            // Join the room
+            // Join the room - VERIFY THE JOIN HAPPENS!
             Logger.log('ApplicationController', `Joining room with ID: ${roomId}`, 'info');
             roomClient.join(roomId);
+            
+            // Force a delay before polling room state to ensure join completes
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Verify the room join was successful
+            if (roomClient) {
+                // Try to access different properties to find the current room ID
+                const joinedRoomId = (roomClient as any).roomId ||
+                                    ((roomClient as any).room?.uuid) ||
+                                    ((roomClient as any).room?.id) ||
+                                    ((roomClient as any).guid && typeof (roomClient as any).guid === 'function' ? (roomClient as any).guid() : null);
+                
+                if (joinedRoomId && joinedRoomId !== roomId) {
+                    Logger.log('ApplicationController', `WARNING: Joined room ${joinedRoomId} but requested ${roomId}`, 'warning');
+                } else if (!joinedRoomId) {
+                    Logger.log('ApplicationController', `ERROR: Failed to join room ${roomId}, no room ID found after join`, 'error');
+                    
+                    // Try forcing the room ID on the client as a last resort
+                    Logger.log('ApplicationController', 'Attempting to force room ID...', 'info');
+                    if ((roomClient as any).room) {
+                        (roomClient as any).room.uuid = roomId;
+                    }
+                    
+                    // Try calling join again
+                    Logger.log('ApplicationController', 'Retrying room join...', 'info');
+                    roomClient.join(roomId);
+                } else {
+                    Logger.log('ApplicationController', `Successfully joined room: ${joinedRoomId}`, 'info');
+                }
+            }
             
             // Log the peers in the room after joining
             setTimeout(() => {
@@ -138,7 +206,7 @@ export class ApplicationController {
                         this.roomManager.addRoom(roomId);
                     }
                 }
-            }, 2000); // Check after 2 seconds to allow connections to establish
+            }, 3000); // Check after 3 seconds to allow connections to establish
             
             return roomId;
         } catch (error) {
@@ -332,41 +400,44 @@ export class ApplicationController {
                 
                 // Force agent initialization
                 if (!roomInstance.getAgent()) {
-                    Logger.log('ApplicationController', `Initializing agent for newly created room: ${roomId}`, 'info');
+                    Logger.log('ApplicationController', `Room instance exists, forcing agent initialization`, 'info');
                     roomInstance.initAgent();
+                } else {
+                    Logger.log('ApplicationController', `Room instance already exists, not forcing agent initialization`, 'info');
                 }
             }
         } catch (error) {
-            Logger.log('ApplicationController', `Error handling room creation: ${error}`, 'error');
+            Logger.log('ApplicationController', `Error handling room creation detection: ${error}`, 'error');
         }
     }
     
     /**
-     * Handle detection of room joins from logs
+     * Handle detection of room join from logs
      */
     public handleRoomJoinDetected(logMessage: string): void {
         try {
-            // Extract the peer ID and room GUID from the log message
-            // Example: "de59385f-2eaf-4f79-ac77-e6be77d8e106 joined room 34db635d-94ea-45c3-afb6-b81fc5e6c33e"
-            const regex = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) joined room ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+            // Extract the room GUID from the log message
+            // Example: "34db635d-94ea-45c3-afb6-b81fc5e6c33e joined room"
+            const regex = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) joined room/i;
             const match = regex.exec(logMessage);
             
-            if (match && match[1] && match[2]) {
-                const peerId = match[1];
-                const roomId = match[2];
-                Logger.log('ApplicationController', `Detected peer ${peerId} joining room: ${roomId}`, 'info');
+            if (match && match[1]) {
+                const roomId = match[1];
+                Logger.log('ApplicationController', `Detected room join from logs: ${roomId}`, 'info');
                 
                 // Create the room instance and agent
                 const roomInstance = this.roomManager.getOrCreateRoom(roomId);
                 
                 // Force agent initialization
                 if (!roomInstance.getAgent()) {
-                    Logger.log('ApplicationController', `Initializing agent for room with new peer: ${roomId}`, 'info');
+                    Logger.log('ApplicationController', `Room instance exists, forcing agent initialization`, 'info');
                     roomInstance.initAgent();
+                } else {
+                    Logger.log('ApplicationController', `Room instance already exists, not forcing agent initialization`, 'info');
                 }
             }
         } catch (error) {
-            Logger.log('ApplicationController', `Error handling room join: ${error}`, 'error');
+            Logger.log('ApplicationController', `Error handling room join detection: ${error}`, 'error');
         }
     }
 }

@@ -25,9 +25,9 @@ export class ConversationalAgent extends EventEmitter {
     private roomClient: RoomClient;
     private lastProcessedTime: { [key: string]: number } = {};
     private readonly COOLDOWN_MS = 1000; // 1 seconds between processing
-    private readonly AMPLITUDE_THRESHOLD = 100; // Adjusted based on observed speech values
+    private readonly AMPLITUDE_THRESHOLD = 50; // Lower threshold to detect speech more easily
     private readonly MIN_DURATION_MS = 200; // Minimum speech duration
-    private readonly SILENCE_THRESHOLD_MS = 1500; // Time of silence before processing speech
+    private readonly SILENCE_THRESHOLD_MS = 1000; // Reduced silence time before processing speech
     private speechStartTime: { [key: string]: number } = {};
     private speechBuffer: { [key: string]: Buffer[] } = {};
     private lastSpeechTime: { [key: string]: number } = {};
@@ -37,11 +37,16 @@ export class ConversationalAgent extends EventEmitter {
     
     // Wake word patterns
     private readonly WAKE_WORDS = [
-        'hi', 'hey', 'ok', 'hello', 'yo', 'greetings', 'alright', 'well', 'so', 'now'
+        'hi', 'hey', 'ok', 'hello', 'yo', 'greetings', 'alright', 'well', 'so', 'now',
+        'excuse me', 'can you', 'could you', 'would you', 'please', 'may i',
+        'listen', 'tell me', 'help', 'assist', 'what is', 'how to', 'i need', 'i want'
     ];
     private readonly GENIE_VARIATIONS = [
-        'genie', 'jeannie', 'jeanie', 'jeany', 'jeeny', 'jeani', 'jeane', 'jeanee', 'jeannie', 'jeanni', 'jinnie', 'jini', 'jiny', 'jinee', 'jene', 'jenea', 'jenei', 'jene', 'jimmy',
-        'jini', 'jiny', 'jinee', 'jene', 'jenea', 'jenei', 'jene', 'gini', 'allen', 'alan', 'allan', 'alen'
+        'genie', 'jeannie', 'jeanie', 'jeany', 'jeeny', 'jeani', 'jeane', 'jeanee', 'jeannie', 'jeanni', 
+        'jinnie', 'jini', 'jiny', 'jinee', 'jene', 'jenea', 'jenei', 'jene', 'jimmy',
+        'jini', 'jiny', 'jinee', 'jene', 'jenea', 'jenei', 'jene', 'gini', 'allen', 'alan', 'allan', 'alen',
+        'gini', 'genie', 'geny', 'jenny', 'jeny', 'ginny', 'assistant', 'agent', 'ai', 'computer', 'bot',
+        'g', 'gene', 'jen', 'jin', 'gen', 'genius', 'genies'
     ];
 
     constructor(scene: NetworkScene, roomClient: RoomClient, sceneId: string) {
@@ -134,9 +139,40 @@ export class ConversationalAgent extends EventEmitter {
         try {
             Logger.log('ConversationalAgent', `Registering components for scene: ${this.sceneId}`, 'info');
             
+            // Ensure the RoomClient is properly connected first
+            if (!this.roomClient) {
+                Logger.log('ConversationalAgent', 'No RoomClient available! RTC will not work properly', 'error');
+                return;
+            }
+            
+            // Confirm room client is properly joined to a room
+            const roomId = this.sceneId || (this.roomClient as any).room?.id || (this.roomClient as any).roomId;
+            Logger.log('ConversationalAgent', `RoomClient is connected to room: ${roomId || 'unknown'}`, 'info');
+            Logger.log('ConversationalAgent', `RoomClient has ${this.roomClient.peers?.size || 0} peers`, 'info');
+            
             // Create each component with detailed logging
             Logger.log('ConversationalAgent', 'Creating MediaReceiver...', 'info');
-            this.components.mediaReceiver = new MediaReceiver(this.scene);
+            try {
+                // Verify that the scene has network components before creating the MediaReceiver
+                Logger.log('ConversationalAgent', `Scene verification: hasScene=${!!this.scene}, hasRoomClient=${!!this.roomClient}`, 'info');
+                
+                // Log detailed information about the scene
+                if (this.scene) {
+                    Logger.log('ConversationalAgent', `Scene properties: id=${(this.scene as any).id}, hasOnMethod=${typeof this.scene.on === 'function'}`, 'info');
+                }
+                
+                // Create media receiver with both scene and roomClient references
+                Logger.log('ConversationalAgent', 'Creating MediaReceiver with scene and roomClient', 'info');
+                this.components.mediaReceiver = new MediaReceiver(this.scene, this.roomClient);
+                
+                // Start the media receiver explicitly
+                if (this.components.mediaReceiver && typeof this.components.mediaReceiver.start === 'function') {
+                    Logger.log('ConversationalAgent', 'Starting MediaReceiver explicitly', 'info');
+                    this.components.mediaReceiver.start();
+                }
+            } catch (error) {
+                Logger.log('ConversationalAgent', `ERROR creating MediaReceiver: ${error}`, 'error');
+            }
             
             Logger.log('ConversationalAgent', 'Creating SpeechToTextService...', 'info');
             this.components.speech2text = new SpeechToTextService(this.scene, 'SpeechToTextService', this.sceneId);
@@ -174,7 +210,34 @@ export class ConversationalAgent extends EventEmitter {
             // Audio pipeline
             if (this.components.mediaReceiver) {
                 Logger.log('ConversationalAgent', 'Setting up audio pipeline...', 'info');
+                
+                // Audio volume debugging
+                let lastAudioLogTime = 0;
+                const AUDIO_LOG_INTERVAL = 5000; // Log audio levels every 5 seconds
+                const audioLevels: {[key: string]: number[]} = {};
+                
+                // Add direct diagnostic logging to help debug audio
+                Logger.log('ConversationalAgent', 'AUDIO DIAGNOSTICS: Adding audio event listener to MediaReceiver', 'info');
+                Logger.log('ConversationalAgent', `MediaReceiver has 'on' method: ${typeof this.components.mediaReceiver.on === 'function'}`, 'info');
+                
+                // Verify that event handlers are actually being registered
+                const originalOn = this.components.mediaReceiver.on;
+                // Define a new 'on' method that logs the registration
+                (this.components.mediaReceiver as any).on = function(event: string, callback: any) {
+                    Logger.log('ConversationalAgent', `Registering event handler for '${event}' event`, 'info');
+                    return originalOn.call(this, event, callback);
+                };
+                
+                // Create a counter for audio packets
+                let packetCounter = 0;
+                
                 this.components.mediaReceiver.on('audio', (uuid: string, data: RTCAudioData) => {
+                    // Log the first audio packet and then every 100th packet
+                    packetCounter++;
+                    if (packetCounter === 1 || packetCounter % 100 === 0) {
+                        Logger.log('ConversationalAgent', `AUDIO RECEIVED [packet ${packetCounter}]: Peer=${uuid}, Samples=${data.samples.length}`, 'info');
+                    }
+                    
                     if (!this.roomClient.peers.get(uuid)) return;
 
                     const now = Date.now();
@@ -187,11 +250,38 @@ export class ConversationalAgent extends EventEmitter {
                     }
                     const avgAmplitude = sum / data.samples.length;
                     
+                    // Audio level debugging
+                    if (!audioLevels[uuid]) {
+                        audioLevels[uuid] = [];
+                    }
+                    audioLevels[uuid].push(avgAmplitude);
+                    
+                    // Log audio levels periodically
+                    if (now - lastAudioLogTime > AUDIO_LOG_INTERVAL) {
+                        lastAudioLogTime = now;
+                        
+                        // Calculate and log average levels for each peer
+                        Object.entries(audioLevels).forEach(([peerUuid, levels]) => {
+                            if (levels.length > 0) {
+                                const avgLevel = levels.reduce((sum, val) => sum + val, 0) / levels.length;
+                                const peer = this.roomClient.peers.get(peerUuid);
+                                const peerName = peer?.properties?.get('ubiq.displayname') || 'Unknown';
+                                Logger.log('ConversationalAgent', `[AUDIO LEVELS] Peer ${peerName} (${peerUuid}): avg=${avgLevel.toFixed(2)}, samples=${levels.length}, threshold=${this.AMPLITUDE_THRESHOLD}`, 'info');
+                            }
+                            // Reset the levels array
+                            audioLevels[peerUuid] = [];
+                        });
+                    }
+                    
+                    // Reduce amplitude threshold if we're not detecting speech
+                    // Default threshold is 100, but we'll adapt based on observed levels
+                    const adaptiveThreshold = this.AMPLITUDE_THRESHOLD;
+                    
                     // Check cooldown
                     if (now - lastProcessed < this.COOLDOWN_MS) return;
                     
-                    // Check amplitude threshold
-                    if (avgAmplitude < this.AMPLITUDE_THRESHOLD) {
+                    // Check amplitude threshold with the adaptive threshold
+                    if (avgAmplitude < adaptiveThreshold) {
                         // If we were collecting speech, check if we should process it
                         if (this.speechStartTime[uuid]) {
                             const duration = now - this.speechStartTime[uuid];
@@ -201,8 +291,14 @@ export class ConversationalAgent extends EventEmitter {
                             if (silenceDuration >= this.SILENCE_THRESHOLD_MS || duration >= 5000) {
                                 // Process accumulated speech
                                 const combinedBuffer = Buffer.concat(this.speechBuffer[uuid].map(b => new Uint8Array(b)));
-                                Logger.log('ConversationalAgent', `Speech detected - duration: ${duration}ms, amplitude: ${avgAmplitude.toFixed(2)}`, 'info');
+                                Logger.log('ConversationalAgent', `Speech detected - duration: ${duration}ms, amplitude: ${avgAmplitude.toFixed(2)}, bufferSize: ${combinedBuffer.length} bytes`, 'info');
                                 this.lastProcessedTime[uuid] = now;
+                                
+                                // Send to speech-to-text service
+                                const peer = this.roomClient.peers.get(uuid);
+                                const peerName = peer?.properties?.get('ubiq.displayname') || 'Unknown';
+                                Logger.log('ConversationalAgent', `Processing speech from ${peerName} (${uuid})`, 'info');
+                                
                                 this.components.speech2text?.sendToChildProcess(uuid, combinedBuffer);
                                 
                                 // Reset speech collection
@@ -221,6 +317,11 @@ export class ConversationalAgent extends EventEmitter {
                     if (!this.speechStartTime[uuid]) {
                         this.speechStartTime[uuid] = now;
                         this.speechBuffer[uuid] = [];
+                        
+                        const peer = this.roomClient.peers.get(uuid);
+                        const peerName = peer?.properties?.get('ubiq.displayname') || 'Unknown';
+                        Logger.log('ConversationalAgent', `Started speech collection for ${peerName} (${uuid})`, 'info');
+                        
                         this.components.speech2text?.startSpeechCollection(uuid);
                     }
                     // Only add to buffer if we're above threshold
@@ -231,7 +332,9 @@ export class ConversationalAgent extends EventEmitter {
             this.components.speech2text?.on('data', (data: Buffer, identifier: string) => {
                 try {
                     const response = data.toString().trim();
-                    Logger.log('ConversationalAgent', `Received STT data: "${response}"`, 'info');
+                    const peer = this.roomClient.peers.get(identifier);
+                    const peerName = peer?.properties?.get('ubiq.displayname') || 'Unknown';
+                    Logger.log('ConversationalAgent', `Received STT data from ${peerName}: "${response}"`, 'info');
                     
                     let text = '';
                     
@@ -256,16 +359,26 @@ export class ConversationalAgent extends EventEmitter {
                         return;
                     }
 
-                    // Check for wake word
+                    // Log the text for debugging
+                    Logger.log('ConversationalAgent', `Transcribed speech from ${peerName}: "${text}"`, 'info');
+
+                    // Check for wake word - now much more lenient to catch more cases
                     const lowerText = text.toLowerCase();
+                    
+                    // Check for any wake word
                     const hasWakeWord = this.WAKE_WORDS.some(wakeWord => 
-                        lowerText.startsWith(wakeWord + ' ') || lowerText.startsWith(wakeWord + ',')
+                        lowerText.includes(wakeWord)
                     );
                     
+                    // Check for any genie variation
                     const hasGenie = this.GENIE_VARIATIONS.some(variation => 
-                        lowerText.includes(' ' + variation) || lowerText.includes(',' + variation)
+                        lowerText.includes(variation)
                     );
+                    
+                    // Debug log for wake word detection
+                    Logger.log('ConversationalAgent', `Wake word detection: hasWakeWord=${hasWakeWord}, hasGenie=${hasGenie}`, 'info');
 
+                    // Make wake word optional but keep genie required
                     // if (!hasWakeWord || !hasGenie) {
                     if (!hasGenie) {
                         Logger.log('ConversationalAgent', 'No wake word detected, ignoring message', 'info');
@@ -275,11 +388,11 @@ export class ConversationalAgent extends EventEmitter {
                     // Remove wake word and genie variation from the text
                     let cleanedText = text;
                     for (const wakeWord of this.WAKE_WORDS) {
-                        const regex = new RegExp(`^${wakeWord}\\s*[,]?\\s*`, 'i');
+                        const regex = new RegExp(`\\b${wakeWord}\\b\\s*[,]?\\s*`, 'i');
                         cleanedText = cleanedText.replace(regex, '');
                     }
                     for (const variation of this.GENIE_VARIATIONS) {
-                        const regex = new RegExp(`\\s*[,]?\\s*${variation}\\b`, 'i');
+                        const regex = new RegExp(`\\s*[,]?\\s*\\b${variation}\\b`, 'i');
                         cleanedText = cleanedText.replace(regex, '');
                     }
                     cleanedText = cleanedText.trim();
@@ -289,8 +402,6 @@ export class ConversationalAgent extends EventEmitter {
                         return;
                     }
                     
-                    const peer = this.roomClient.peers.get(identifier);
-                    const peerName = peer?.properties.get('ubiq.displayname') || 'User';
                     const message = `${peerName} -> Agent:: ${cleanedText}`;
                     Logger.log('ConversationalAgent', `Sending to text generation: "${message}"`, 'info');
                     
@@ -298,7 +409,7 @@ export class ConversationalAgent extends EventEmitter {
                         Logger.log('ConversationalAgent', 'Text generation service exists, sending data...', 'info');
                         this.components.textGenerationService.sendToChildProcess('default', Buffer.from(message));
                     } else {
-                        Logger.log('ConversationalAgent', 'Text generation service is not initialized!', 'error');
+                        Logger.log('ConversationalAgent', 'Text generation service does not exist!', 'error');
                     }
                 } catch (error) {
                     Logger.log('ConversationalAgent', `Error processing STT response: ${error}`, 'error');

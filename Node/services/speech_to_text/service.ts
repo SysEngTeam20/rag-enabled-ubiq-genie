@@ -77,54 +77,128 @@ class SpeechToTextService extends ServiceController {
             return;
         }
 
-        // Include sceneId in the WebSocket connection URL for scene-specific processing
-        const ws = new WebSocket(`ws://localhost:5001/stt/ws/${identifier}?sceneId=${this.sceneId}`);
-        
-        ws.on('open', () => {
-            Logger.log('SpeechToTextService', `WebSocket connected for peer ${identifier} in scene ${this.sceneId}`, 'info');
-            this.wsConnections.set(identifier, ws);
-            this.isProcessing.set(identifier, false);
-        });
+        try {
+            // Include sceneId in the WebSocket connection URL for scene-specific processing
+            const wsUrl = `ws://localhost:5001/stt/ws/${identifier}?sceneId=${this.sceneId}`;
+            Logger.log('SpeechToTextService', `Connecting to WebSocket: ${wsUrl}`, 'info');
+            
+            const ws = new WebSocket(wsUrl);
+            
+            ws.on('open', () => {
+                Logger.log('SpeechToTextService', `WebSocket connected for peer ${identifier} in scene ${this.sceneId}`, 'info');
+                this.wsConnections.set(identifier, ws);
+                this.isProcessing.set(identifier, false);
+                
+                // Get peer name if available
+                const peer = this.roomClient?.peers.get(identifier);
+                const peerName = peer?.properties?.get('ubiq.displayname') || 'Unknown';
+                Logger.log('SpeechToTextService', `WebSocket ready for peer ${peerName} (${identifier})`, 'info');
+                
+                // Send a ping to verify connection is working
+                const pingMessage = {
+                    type: 'ping',
+                    sceneId: this.sceneId,
+                    peerId: identifier
+                };
+                ws.send(JSON.stringify(pingMessage));
+            });
 
-        ws.on('message', (data: Buffer) => {
-            try {
-                const response = JSON.parse(data.toString());
-                if (response.text && response.text !== '[No speech detected]') {
-                    this.emit('data', Buffer.from(response.text), identifier);
+            ws.on('message', (data: Buffer) => {
+                try {
+                    const response = JSON.parse(data.toString());
+                    
+                    // Log all incoming messages for debugging
+                    Logger.log('SpeechToTextService', `WebSocket message from STT server: ${JSON.stringify(response)}`, 'info');
+                    
+                    if (response.type === 'pong') {
+                        Logger.log('SpeechToTextService', `Received pong from STT server for peer ${identifier}`, 'info');
+                        return;
+                    }
+                    
+                    if (response.text) {
+                        if (response.text !== '[No speech detected]') {
+                            // Get peer name if available
+                            const peer = this.roomClient?.peers.get(identifier);
+                            const peerName = peer?.properties?.get('ubiq.displayname') || 'Unknown';
+                            Logger.log('SpeechToTextService', `Speech detected from ${peerName}: "${response.text}"`, 'info');
+                            
+                            this.emit('data', Buffer.from(response.text), identifier);
+                        } else {
+                            Logger.log('SpeechToTextService', `No speech detected for peer ${identifier}`, 'info');
+                        }
+                    }
+                } catch (error) {
+                    Logger.log('SpeechToTextService', `Error processing WebSocket message: ${error}`, 'error');
                 }
-            } catch (error) {
-                Logger.log('SpeechToTextService', `Error processing WebSocket message: ${error}`, 'error');
-            }
-        });
+            });
 
-        ws.on('close', () => {
-            Logger.log('SpeechToTextService', `WebSocket closed for peer ${identifier}`, 'info');
-            this.wsConnections.delete(identifier);
-            this.isProcessing.delete(identifier);
-        });
+            ws.on('close', () => {
+                Logger.log('SpeechToTextService', `WebSocket closed for peer ${identifier}`, 'info');
+                this.wsConnections.delete(identifier);
+                this.isProcessing.delete(identifier);
+                
+                // Try to reconnect after a delay
+                setTimeout(() => {
+                    if (this.roomClient?.peers.has(identifier)) {
+                        Logger.log('SpeechToTextService', `Attempting to reconnect WebSocket for peer ${identifier}`, 'info');
+                        this.connectWebSocket(identifier);
+                    }
+                }, 5000);
+            });
 
-        ws.on('error', (error) => {
-            Logger.log('SpeechToTextService', `WebSocket error for peer ${identifier}: ${error}`, 'error');
-            this.wsConnections.delete(identifier);
-            this.isProcessing.delete(identifier);
-        });
+            ws.on('error', (error) => {
+                Logger.log('SpeechToTextService', `WebSocket error for peer ${identifier}: ${error}`, 'error');
+                this.wsConnections.delete(identifier);
+                this.isProcessing.delete(identifier);
+                
+                // Try to reconnect after a delay
+                setTimeout(() => {
+                    if (this.roomClient?.peers.has(identifier)) {
+                        Logger.log('SpeechToTextService', `Attempting to reconnect WebSocket after error for peer ${identifier}`, 'info');
+                        this.connectWebSocket(identifier);
+                    }
+                }, 5000);
+            });
+        } catch (error) {
+            Logger.log('SpeechToTextService', `Error creating WebSocket connection for peer ${identifier}: ${error}`, 'error');
+            
+            // Try to reconnect after a delay
+            setTimeout(() => {
+                if (this.roomClient?.peers.has(identifier)) {
+                    Logger.log('SpeechToTextService', `Attempting to reconnect WebSocket after connection error for peer ${identifier}`, 'info');
+                    this.connectWebSocket(identifier);
+                }
+            }, 5000);
+        }
     }
 
     async sendToChildProcess(identifier: string, data: Buffer): Promise<boolean> {
         try {
             // Only process if we have actual data and we're collecting speech
-            if (!data || data.length === 0 || !this.isCollectingSpeech.get(identifier)) {
+            if (!data || data.length === 0) {
                 return false;
             }
+            
+            // Log the audio data being processed
+            const peer = this.roomClient?.peers.get(identifier);
+            const peerName = peer?.properties?.get('ubiq.displayname') || 'Unknown';
+            Logger.log('SpeechToTextService', `Processing audio data from ${peerName} (${identifier}): ${data.length} bytes`, 'info');
 
             // Ensure WebSocket connection exists
             if (!this.wsConnections.has(identifier)) {
+                Logger.log('SpeechToTextService', `WebSocket not connected for peer ${identifier}, attempting to connect...`, 'info');
                 await this.connectWebSocket(identifier);
+                
+                // Give it a moment to connect
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
 
             const ws = this.wsConnections.get(identifier);
             if (!ws || ws.readyState !== WebSocket.OPEN) {
-                Logger.log('SpeechToTextService', `WebSocket not ready for peer ${identifier}`, 'error');
+                Logger.log('SpeechToTextService', `WebSocket not ready for peer ${identifier} (state: ${ws?.readyState})`, 'error');
+                
+                // Try to reconnect
+                this.connectWebSocket(identifier);
                 return false;
             }
 
@@ -132,11 +206,14 @@ class SpeechToTextService extends ServiceController {
             const audioData = {
                 audio: data.toString('base64'),
                 sceneId: this.sceneId,
-                peerId: identifier
+                peerId: identifier,
+                peerName: peerName
             };
             
-            ws.send(JSON.stringify(audioData));
+            // Log that we're sending data
+            Logger.log('SpeechToTextService', `Sending ${Math.floor(data.length / 1024)} KB of audio data to STT server for ${peerName}`, 'info');
             
+            ws.send(JSON.stringify(audioData));
             return true;
         } catch (error) {
             Logger.log('SpeechToTextService', `Error sending data: ${error}`, 'error');
