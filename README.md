@@ -175,61 +175,33 @@ WEBSOCKET_SERVER_URL=ws://localhost:5001
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/your-org/ubiq-genie.git
+git clone https://github.com/SysEngTeam20/ubiq-genie.git
 cd ubiq-genie
 ```
 
-2. Copy the environment template:
+2. Set up Python environment:
 ```bash
-cp .env.template .env
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-3. Update the `.env` file with your configuration values.
-
-## Build Instructions
-
-### NextJS App
-
-1. Navigate to the NextJS app directory:
+3. Set up Node.js environment:
 ```bash
-cd Node/components/admin-app
-```
-
-2. Install dependencies:
-```bash
+cd Node
 npm install
 ```
 
-3. Build the app:
+4. Configure environment variables:
 ```bash
-npm run build
+cp .env.template .env.local
+# Edit .env.local with your configuration
 ```
 
-4. Start the development server:
+5. Launch the system:
 ```bash
-npm run dev
-```
-
-### ElectronJS App
-
-1. Navigate to the Electron app directory:
-```bash
-cd Node/components/electron-app
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
-
-3. Build the app:
-```bash
-npm run build
-```
-
-4. Start the development server:
-```bash
-npm run start
+cd Node
+npm start conversational_agent
 ```
 
 ## Deployment
@@ -313,26 +285,22 @@ kubectl delete -f k8s/secrets.yaml
 
 ### Adding New Services
 
-1. Duplicate the `Node/services/base` folder and rename it to your service name
-2. Update the service class name in `service.ts`
-3. Add any required child processes (e.g., Python scripts)
-4. Update the service configuration in your application's `config.json`
+1. Create service directory in `Node/services/`
+2. Implement service controller
+3. Add required Python scripts
+4. Register in application pipeline
 
 ### Adding New Applications
 
-1. Duplicate the `Node/apps/base` folder and rename it to your application name
-2. Update the application class name in `app.ts`
-3. Configure the application in `config.json`
-4. Create a corresponding Unity scene in `Unity/Assets/Apps`
+1. Create application directory in `Node/apps/`
+2. Implement application controller
+3. Configure in `config.json`
+4. Create Unity scene
 
-## Contributing
+## Related Repositories
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+- [compiled-granite-server](https://github.com/SysEngTeam20/compiled-granite-server) - Local LLM server
+- [stt-tts-compiled-whisper-server](https://github.com/SysEngTeam20/stt-tts-compiled-whisper-server) - STT/TTS WebSocket server
+- [portalt-admin-app](https://github.com/SysEngTeam20/portalt-admin-app) - Admin app for managing activities and rooms
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE.txt](LICENSE.txt) file for details.
+> Note: Each repository maintains its own deployment configurations. Please refer to their respective documentation for deployment instructions.
