@@ -1,10 +1,12 @@
-# Use Node.js base image
+# Use Node.js LTS version
 FROM node:20-slim
 
-# Install Python and pip
+# Install Python and required build tools
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    python3-venv \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -16,21 +18,28 @@ COPY Node/package*.json ./
 # Install Node.js dependencies
 RUN npm install
 
-# Copy Python requirements
-COPY requirements.txt ./
-RUN pip3 install -r requirements.txt
+# Set up Python virtual environment
+RUN python3 -m venv /app/venv
+ENV PATH="/app/venv/bin:$PATH"
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY Node/apps/conversational_agent ./apps/conversational_agent
-COPY Node/components ./components
-COPY Node/services ./services
+COPY Node/ .
+COPY .env.template .env.local
 
-# Copy environment variables and config
-COPY .env.local ./
-COPY Node/apps/conversational_agent/config.json ./apps/conversational_agent/
+# Build TypeScript
+RUN npm run build
 
-# Expose necessary ports (from config.json)
-EXPOSE 8009 8010 8011
+# Expose ports for the application and WebSocket server
+EXPOSE 8000
+EXPOSE 5001
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV PYTHONUNBUFFERED=1
 
 # Start the application
-CMD ["npm", "start", "conversational_agent"]
+CMD ["npm", "start", "conversational_agent"] 

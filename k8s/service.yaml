@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ubiq-genie
+  labels:
+    app: ubiq-genie
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  - port: 5001
+    targetPort: 5001
+    protocol: TCP
+    name: websocket
+  selector:
+    app: ubiq-genie 
