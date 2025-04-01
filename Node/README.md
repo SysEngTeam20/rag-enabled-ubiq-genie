@@ -1,39 +1,93 @@
 # Ubiq-Genie
 
-Ubiq-Genie is a framework that enables you to build server-assisted collaborative mixed reality applications with Unity using the [Ubiq](https://ubiq.online) framework. Ubiq-Genie has a modular architecture designed to facilitate the integration of new services and the ability to update or replace individual services without affecting the entire system. The architecture consists of three main components: the Unity scene, applications, and services.
+Ubiq-Genie is a server-assisted collaborative mixed reality application that enables natural language interaction with AI agents in a virtual environment using the [Ubiq](https://ubiq.online) framework. The system supports multi-user interactions in a single room context, with each room corresponding to a specific activity.
 
 ## System Architecture
 
-- **Unity Scenes** serve as the interface for VR users and contain application-specific Unity components that communicate with a server-side `ApplicationController` through a TCP connection, using Ubiq's `Networking` components. These client-side components are written in C# and ensure that outgoing and incoming data are processed and routed correctly. The Unity scene of each application can be found in the `Unity/Assets/Apps` folder.
+The system consists of three main components:
 
-- **Applications** should have an associated Unity scene and `ApplicationController`. The `ApplicationController` is responsible for initializing and managing the services that are required by the application. It also handles the communication between the services and the Unity scene. The `ApplicationController` is written in TypeScript (ESM) and runs on the server. The `ApplicationController` of each of the sample applications can be found in the `app.ts` file in the corresponding folder in the `Node/apps` folder.
+- **Unity Client**: The VR interface where users interact with the AI agent. The Unity scene contains components that communicate with the server through WebRTC connections using Ubiq's `Networking` components.
 
-- **Services** are modular and can be reused in different applications. Each service is responsible for a specific task and is managed by a `ServiceController`. Services typically use child processes to run external applications. For instance, the `ImageGenerationService` spawns a Python child process to generate images with Stable Diffusion 2.0. The `ServiceController` is written in TypeScript (ESM) and runs on the server. The `ServiceController` of each of the sample services can be found in the `service.ts` file in the corresponding folder in the `Node/services` folder.
+- **Node.js Server**: The server-side application that manages:
+  - Speech-to-Text (STT) service for converting user speech to text
+  - Text-to-Speech (TTS) service for generating agent responses
+  - WebSocket communication for real-time audio streaming
+  - Room management and user coordination
 
-## Defining New Services
+- **Python Services**: External services that handle:
+  - Speech recognition (using Whisper)
+  - Text-to-speech synthesis
+  - Audio processing and streaming
 
-To define a new service, follow these steps:
+## Environment Setup
 
-1. Duplicate the `Node/services/base` folder and rename it to the name of your service (e.g., `my_service`). Also replace the class name `BaseService` in the `service.ts` file with the name of your service (e.g., `MyService`).
+1. Create and activate a Python virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
 
-2. For any child processes that your service requires (e.g., Python scripts), copy the corresponding files into the folder you just created. For instance, if your service requires a Python script called `example_service.py`, copy this file into the folder you just created.
+2. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-> [!NOTE]
-> The `BaseService` service provides a minimal example of spawning a Python process that periodically sends a message. For more advanced examples, see the existing services in the `Node/services` folder.
+3. Install Node.js dependencies:
+```bash
+npm install
+```
 
-You are now ready to use your new service in an application. For more information on how to define a new application, see the `How to Define a New Application` section below.
+4. Configure environment variables:
+   - Copy `.env.template` to `.env.local`
+   - Update the variables with your configuration:
+     - `API_BASE_URL`: Base URL for API endpoints
+     - `API_SECRET_KEY`: JWT signing secret
+     - `LLM_SERVER`: Local LLM server address
+     - `LLM_PORT`: Local LLM server port
+     - `ACTIVITY_ID`: Activity identifier
+     - `WEBSOCKET_SERVER_URL`: WebSocket server for STT/TTS
 
-## Defining New Applications
+## Running the Application
 
-To define a new application, follow these steps:
+1. Start the Node.js server:
+```bash
+npm start conversational_agent
+```
 
-1. Duplicate the `Node/apps/base` folder and rename it to the name of your application (e.g., `my_application`). Also replace the class name `BaseApplication` in the `app.ts` file with the name of your application (e.g., `MyApplication`).
+2. Launch the Unity client and connect to the room specified in your configuration.
 
-> [!NOTE]
-> The `BaseApplication` application provides a minimal example of creating an application using the `BaseService` service. For more advanced examples, see the existing applications in the `Node/apps` folder. The `registerComponents` method defines the components of the application, which are stored in a dictionary called `components`. The `definePipeline` method defines the pipeline of the application. The `start` method starts the application by registering the components, defining the pipeline, and joining a room on the specified Ubiq server in the configuration file.
+## Service Architecture
 
-2. Take a look at the `config.json` file in the folder you just created. This file contains the configuration of your application. This includes the name of the application, the GUID of the room that the application will join, the information required to join or start a Ubiq server, and the ICE servers that are used for WebRTC connections. Note that `joinExisting` should be set to `true` if you want to join an existing server, and `false` if you want to start a new server. For more information on Ubiq servers and messages, see the [Ubiq documentation](https://ucl-vr.github.io/ubiq/serverintroduction/).
+Each service in the system follows a modular design:
 
-3. In Unity, duplicate the `Unity/Assets/Apps/Base` folder and rename it to the name of your application (e.g., `MyApplication`). This folder will contain the Unity scene of your application.
+- **ServiceController**: Manages the service lifecycle and communication
+- **Child Processes**: External applications (Python scripts) that handle specific tasks
+- **WebSocket Communication**: Real-time data streaming between services
 
-4. In the Unity scene hierarchy, navigate to `Ubiq-Genie/`, where we recommend you place any application-specific components that communicate with the server-side process of your Ubiq-Genie application. In the Base application, this is simply a `MessageReceiver` component that listens for messages from the server, which are sent by the Python process of the `BaseService` service that is part of the `BaseApplication` application.
+## Development
+
+### Adding New Services
+
+1. Create a new service directory in `Node/services/`
+2. Implement the service controller extending `ServiceController`
+3. Add any required Python scripts for external processing
+4. Register the service in your application's pipeline
+
+### Adding New Applications
+
+1. Create a new application directory in `Node/apps/`
+2. Implement the application controller
+3. Configure the application in `config.json`
+4. Create corresponding Unity scene and components
+
+## Configuration
+
+The system uses several configuration files:
+
+- `.env.local`: Environment variables for the Node.js server
+- `config.json`: Application-specific configuration
+- `secrets.yaml`: Kubernetes secrets template for deployment
+
+## Deployment
+
+See the main README.md for deployment instructions using Docker and Kubernetes.
