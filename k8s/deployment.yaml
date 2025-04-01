@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ubiq-genie
+  labels:
+    app: ubiq-genie
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ubiq-genie
+  template:
+    metadata:
+      labels:
+        app: ubiq-genie
+    spec:
+      containers:
+      - name: ubiq-genie
+        image: ubiq-genie:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: API_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: ubiq-genie-secrets
+              key: api-base-url
+        - name: API_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ubiq-genie-secrets
+              key: api-secret-key
+        - name: LLM_SERVER
+          valueFrom:
+            secretKeyRef:
+              name: ubiq-genie-secrets
+              key: llm-server
+        - name: LLM_PORT
+          valueFrom:
+            secretKeyRef:
+              name: ubiq-genie-secrets
+              key: llm-port
+        - name: ACTIVITY_ID
+          valueFrom:
+            secretKeyRef:
+              name: ubiq-genie-secrets
+              key: activity-id
+        - name: WEBSOCKET_SERVER_URL
+          valueFrom:
+            secretKeyRef:
+              name: ubiq-genie-secrets
+              key: websocket-server-url
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 20 

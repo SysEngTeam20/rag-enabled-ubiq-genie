@@ -4,7 +4,7 @@ import WebSocket from 'ws';
 
 export class TextToSpeechService extends ServiceController {
     private wsConnection: WebSocket | null = null;
-    private readonly WS_SERVER = 'ws://localhost:5001/tts/ws';
+    private readonly WS_SERVER = process.env.WEBSOCKET_SERVER_URL || 'ws://localhost:5001';
     private reconnectAttempts = 0;
     private readonly MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -16,7 +16,7 @@ export class TextToSpeechService extends ServiceController {
     private setupWebSocket() {
         try {
             const clientId = Math.random().toString(36).substring(7);
-            this.wsConnection = new WebSocket(`${this.WS_SERVER}/${clientId}`);
+            this.wsConnection = new WebSocket(`${this.WS_SERVER}/tts/ws/${clientId}`);
 
             this.wsConnection.on('open', () => {
                 console.log('[TextToSpeechService] WebSocket connected');

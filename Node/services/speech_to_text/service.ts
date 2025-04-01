@@ -9,7 +9,7 @@ import WebSocket from 'ws';
 
 class SpeechToTextService extends ServiceController {
     private ttsService: TextToSpeechService | undefined;
-    private readonly STT_SERVER = 'http://localhost:5001/stt';
+    private readonly WS_SERVER = process.env.WEBSOCKET_SERVER_URL || 'ws://localhost:5001';
     private reconnectAttempts = 0;
     private readonly MAX_RECONNECT_ATTEMPTS = 5;
     private readonly BUFFER_SIZE = 4800; // 100ms of audio at 48kHz
@@ -74,7 +74,7 @@ class SpeechToTextService extends ServiceController {
             return;
         }
 
-        const ws = new WebSocket(`ws://localhost:5001/stt/ws/${identifier}`);
+        const ws = new WebSocket(`${this.WS_SERVER}/stt/ws/${identifier}`);
         
         ws.on('open', () => {
             console.log(`[SpeechToTextService] WebSocket connected for peer ${identifier}`);
