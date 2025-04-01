@@ -114,13 +114,106 @@ npm start
 
 ## Testing
 
-**Direct LLM Test**:
+The project includes a comprehensive test suite with unit tests, integration tests, and end-to-end tests.
 
-**RAG Pipeline Test**:
-```bash
-python test-rag.py --query "What's our return policy?" \
-  --activity_id retail-docs
+### Test Structure
+
 ```
+tests/
+├── unit/
+│   └── test_rag_service.py      # RAG service unit tests
+├── integration/
+│   └── test_text_generation_service.py  # Text generation service integration tests
+├── e2e/
+│   └── test_conversational_agent.py     # End-to-end conversational agent tests
+└── conftest.py                  # Shared test fixtures and configuration
+```
+
+### Running Tests
+
+1. Install test dependencies:
+```bash
+pip install pytest pytest-cov pytest-mock
+```
+
+2. Run all tests:
+```bash
+pytest tests/
+```
+
+3. Run specific test categories:
+```bash
+# Run unit tests only
+pytest tests/unit/
+
+# Run integration tests only
+pytest tests/integration/
+
+# Run end-to-end tests only
+pytest tests/e2e/
+```
+
+4. Run tests with coverage:
+```bash
+pytest --cov=Node tests/
+```
+
+### Test Categories
+
+#### Unit Tests
+- Test individual components in isolation
+- Mock external dependencies
+- Fast execution
+- Located in `tests/unit/`
+
+#### Integration Tests
+- Test component interactions
+- Test service communication
+- Located in `tests/integration/`
+
+#### End-to-End Tests
+- Test complete user flows
+- Test system-wide functionality
+- Located in `tests/e2e/`
+
+### Test Data
+
+Test data is stored in `tests/data/` and includes:
+- Mock documents for RAG testing
+- Sample audio files for STT/TTS testing
+- Test configuration files
+
+### Writing New Tests
+
+1. Choose the appropriate test category:
+   - Unit tests for isolated components
+   - Integration tests for service interactions
+   - E2E tests for complete flows
+
+2. Use the provided fixtures in `conftest.py`:
+   ```python
+   def test_example(mock_env_vars, rag_service):
+       # Your test code here
+   ```
+
+3. Follow the testing guidelines:
+   - Use descriptive test names
+   - Test both success and failure cases
+   - Mock external dependencies
+   - Clean up resources after tests
+
+### Continuous Integration
+
+Tests are automatically run in CI/CD pipelines:
+- Unit tests run on every commit
+- Integration tests run on pull requests
+- E2E tests run on merge to main
+
+### Test Coverage Requirements
+
+- Minimum 80% code coverage for all new code
+- 100% coverage for critical paths
+- Coverage reports generated in `coverage/`
 
 ## Documentation
 
